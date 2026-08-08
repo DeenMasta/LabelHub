@@ -30,3 +30,7 @@ Before adding a helper, model, provider, or service, search the relevant feature
 ## Agent Implementation Rules
 
 Implement one coherent vertical slice at a time and avoid unrelated refactors. Keep public contracts small and explicit. Use Riverpod for application state and GoRouter for navigation; do not introduce alternative state or routing systems. Store structured records through the local database layer only; the app must remain usable offline. Validate barcode data before rendering or printing and surface invalid input instead of silently changing it. For a behavior change, update or add a focused `flutter_test` test, then run analysis and the relevant test command before handoff.
+
+## Physical Device Safety
+
+Never change a physical device's display size, density, orientation, navigation mode, gesture settings, accessibility settings, power state, or any other system setting while developing or validating this repository. Do not reboot, lock, unlock, install to, stop apps on, or otherwise control a physical device unless the user explicitly requests that exact device action. Use widget tests, an emulator, or a user-provided screenshot for UI validation; report any validation limitation rather than changing device state.

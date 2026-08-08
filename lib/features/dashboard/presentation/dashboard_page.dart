@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/presentation/widgets/app_page_content.dart';
+
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
 
@@ -8,47 +10,60 @@ class DashboardPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ColoredBox(
       color: _screenBackground,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 448),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-            children: const <Widget>[
-              _DashboardHeader(),
-              SizedBox(height: 16),
-              _DashboardTabs(),
-              SizedBox(height: 20),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: _MetricCard(
-                      label: 'Print Jobs',
-                      value: '12',
-                      detail: 'recent',
-                      icon: Icons.print_outlined,
-                      tint: Color(0xFF26394B),
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: _MetricCard(
-                      label: 'Total Printed Labels',
-                      value: '6,500',
-                      detail: 'all time',
-                      icon: Icons.local_offer_outlined,
-                      tint: Color(0xFF26394B),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 20),
-              _ChartCard(),
-              SizedBox(height: 20),
-              _LabelLayoutsPanel(),
-            ],
-          ),
-        ),
+      child: const AppPageContent(
+        children: <Widget>[
+          _DashboardHeader(),
+          SizedBox(height: 16),
+          _DashboardTabs(),
+          SizedBox(height: 20),
+          _DashboardMetrics(),
+          SizedBox(height: 20),
+          _ChartCard(),
+          SizedBox(height: 20),
+          _LabelLayoutsPanel(),
+        ],
       ),
+    );
+  }
+}
+
+class _DashboardMetrics extends StatelessWidget {
+  const _DashboardMetrics();
+
+  @override
+  Widget build(BuildContext context) {
+    const cards = <Widget>[
+      _MetricCard(
+        label: 'Print Jobs',
+        value: '12',
+        detail: 'recent',
+        icon: Icons.print_outlined,
+        tint: Color(0xFF26394B),
+      ),
+      _MetricCard(
+        label: 'Total Printed Labels',
+        value: '6,500',
+        detail: 'all time',
+        icon: Icons.local_offer_outlined,
+        tint: Color(0xFF26394B),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[cards[0], SizedBox(height: 12), cards[1]],
+          );
+        }
+        return Row(
+          children: <Widget>[
+            Expanded(child: cards[0]),
+            SizedBox(width: 16),
+            Expanded(child: cards[1]),
+          ],
+        );
+      },
     );
   }
 }

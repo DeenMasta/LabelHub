@@ -4,9 +4,13 @@ Apply these rules to every Flutter UI change together with `AGENTS.md`.
 
 ## Design language
 
-LabelHub uses a clean, compact operational-tool style: white surfaces, navy ink (`#121C2A`), restrained mint accents, pale-blue data marks (`#BFDBFE`), and dark charcoal panels (`#292D2D`). Use the existing 4 px spacing rhythm. Prefer 8, 12, 16, 20, and 24 px spacing; use 9–12 px radii for controls, 16–20 px for cards, and 22–24 px for major panels. New colours, radii, or spacing values used in more than one place must be promoted to a named app theme token; do not repeat raw values across features.
+LabelHub uses a clean, compact operational-tool style: white surfaces, navy ink (`#121C2A`), crisp blue accents (`#2563EB`), pale-blue data marks (`#BFDBFE`), and dark charcoal panels (`#292D2D`). Use the existing 4 px spacing rhythm. Prefer 8, 12, 16, 20, and 24 px spacing; use 9-12 px radii for controls, 16-20 px for cards, and 22-24 px for major panels. Do not use green for product accents, statuses, or primary actions. New colours, radii, or spacing values used in more than one place must be promoted to a named app theme token; do not repeat raw values across features.
 
 Keep one visual hierarchy per screen: product app bar, screen heading, optional compact tabs/filters, summary data, then detailed content. Preserve generous whitespace, aligned card edges, and a single obvious primary action. Use text labels for data and icons only when their action is clear.
+
+## Responsive layout
+
+Primary feature pages must use `AppPageContent`; do not introduce fixed, phone-only content widths. Keep 20 px horizontal gutters below 600 px, move to 32 px on medium-width or landscape layouts, and use 48 px gutters with a maximum 1120 px content area on wide displays. Reflow dense rows into stacked controls on narrow screens, while allowing related cards and data panels to sit side by side once sufficient width is available. The header, primary content, and bottom navigation must remain visible without overlap in both portrait and landscape.
 
 ## Shared shell and component ownership
 
@@ -31,4 +35,8 @@ Use `lower_snake_case.dart` filenames matching the primary public type, PascalCa
 
 Use Material controls with 44 px minimum touch targets, tooltips/semantic labels for icon-only actions, readable contrast, and visible selected, disabled, loading, empty, and error states. Make cards tappable only when the complete card has one clear action.
 
-Before handoff, run `dart format`, `flutter analyze`, and the relevant `flutter test`. For changed mobile layouts, review a 390 × 844 capture and check that the primary content, app bar, and bottom navigation do not overlap.
+Before handoff, run `dart format`, `flutter analyze`, and the relevant `flutter test`. For changed mobile layouts, review a 390 x 844 capture and check that the primary content, app bar, and bottom navigation do not overlap.
+
+## Physical device safety
+
+Never change a physical device's display size, density, orientation, navigation mode, gesture settings, accessibility settings, power state, or any other system setting for UI validation. Do not reboot, lock, unlock, install to, stop apps on, or otherwise control a physical device unless the user explicitly requests that exact device action. Use widget tests, an emulator, or a user-provided screenshot for responsive UI checks. If no safe validation option is available, report that limitation instead of altering the device.

@@ -9,7 +9,7 @@ class AppHeader extends StatelessWidget {
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
         child: Row(
           children: <Widget>[
             const _BrandMark(),
@@ -27,13 +27,13 @@ class AppHeader extends StatelessWidget {
               onPressed: () {},
             ),
             const SizedBox(width: 8),
-            const CircleAvatar(
+            CircleAvatar(
               radius: 16,
-              backgroundColor: Color(0xFFD9E9E4),
+              backgroundColor: Theme.of(context).colorScheme.secondary,
               child: Text(
                 'LH',
                 style: TextStyle(
-                  color: Color(0xFF173326),
+                  color: Theme.of(context).colorScheme.onSecondary,
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                 ),
@@ -80,14 +80,14 @@ class _HeaderAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(9),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(12),
         onTap: onPressed,
         child: SizedBox(
-          width: 34,
-          height: 34,
-          child: Tooltip(message: tooltip, child: Icon(icon, size: 18)),
+          width: 44,
+          height: 44,
+          child: Tooltip(message: tooltip, child: Icon(icon, size: 20)),
         ),
       ),
     );

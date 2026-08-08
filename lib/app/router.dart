@@ -7,6 +7,7 @@ import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/imports/presentation/imports_page.dart';
 import '../features/labels/presentation/labels_page.dart';
 import '../features/records/presentation/records_page.dart';
+import '../features/records/presentation/record_details_page.dart';
 import '../features/templates/presentation/templates_page.dart';
 
 final GoRouter appRouter = GoRouter(
@@ -21,6 +22,11 @@ final GoRouter appRouter = GoRouter(
         GoRoute(path: '/templates', builder: (_, _) => const TemplatesPage()),
         GoRoute(path: '/imports', builder: (_, _) => const ImportsPage()),
         GoRoute(path: '/records', builder: (_, _) => const RecordsPage()),
+        GoRoute(
+          path: '/records/:recordId',
+          builder: (_, GoRouterState state) =>
+              RecordDetailsPage(recordId: state.pathParameters['recordId']!),
+        ),
         GoRoute(path: '/labels', builder: (_, _) => const LabelsPage()),
       ],
     ),
