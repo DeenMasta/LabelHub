@@ -12,6 +12,7 @@ class SystemPdfPrinter implements LabelPrinter {
       id: 'system-pdf',
       name: 'System print dialog',
       kind: PrinterKind.systemPdf,
+      protocol: PrinterProtocol.systemPdf,
     ),
   ];
 

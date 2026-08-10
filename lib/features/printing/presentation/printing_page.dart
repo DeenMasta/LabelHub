@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/printing/label_printer.dart';
-import '../../../core/printing/system_pdf_printer.dart';
+import '../../../core/printing/printer_catalog.dart';
+import '../../../core/printing/thermal_pdf_rasterizer.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
@@ -35,16 +37,19 @@ class PrintingPage extends ConsumerStatefulWidget {
 class _PrintingPageState extends ConsumerState<PrintingPage> {
   static const _documentGenerator = PdfLabelDocumentGenerator();
 
-  final LabelPrinter _printer = SystemPdfPrinter();
+  final PrinterCatalog _printerCatalog = PrinterCatalog();
   final Set<String> _selectedRecordIds = <String>{};
+  List<PrinterDevice> _availablePrinters = const <PrinterDevice>[];
   List<CatalogueRecord> _records = const <CatalogueRecord>[];
   List<PrintJob> _printJobs = const <PrintJob>[];
   Object? _loadError;
   String? _printError;
   bool _isLoading = true;
+  bool _isDiscoveringBluetooth = false;
   bool _isPrinting = false;
   int _copies = 1;
   LabelLayout _layout = productLabelLayout;
+  PrinterDevice? _selectedPrinter;
 
   @override
   void initState() {
@@ -68,8 +73,14 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     });
     try {
       final database = await ref.read(appDatabaseProvider.future);
-      final records = await RecordRepository(database).list();
-      final printJobs = await PrintJobRepository(database).listRecent();
+      final results = await Future.wait<Object>(<Future<Object>>[
+        RecordRepository(database).list(),
+        PrintJobRepository(database).listRecent(),
+        _printerCatalog.initialDevices(),
+      ]);
+      final records = results[0] as List<CatalogueRecord>;
+      final printJobs = results[1] as List<PrintJob>;
+      final printers = results[2] as List<PrinterDevice>;
       if (!mounted) {
         return;
       }
@@ -82,6 +93,8 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
               !_records.any((CatalogueRecord record) => record.id == id),
         );
         _printJobs = printJobs;
+        _availablePrinters = _mergePrinters(printers);
+        _selectedPrinter ??= _availablePrinters.firstOrNull;
       });
     } on Exception catch (error) {
       if (mounted) {
@@ -90,6 +103,48 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  List<PrinterDevice> _mergePrinters(List<PrinterDevice> devices) {
+    final printers = <PrinterDevice>[..._availablePrinters];
+    for (final device in devices) {
+      if (printers.any((PrinterDevice printer) => printer.id == device.id)) {
+        continue;
+      }
+      printers.add(device);
+    }
+    return printers;
+  }
+
+  Future<void> _discoverBluetoothPrinters() async {
+    if (_isDiscoveringBluetooth) {
+      return;
+    }
+    setState(() {
+      _isDiscoveringBluetooth = true;
+      _printError = null;
+    });
+    try {
+      final devices = await _printerCatalog.discoverBluetooth();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _availablePrinters = _mergePrinters(devices));
+      if (devices.isEmpty && mounted) {
+        setState(() {
+          _printError =
+              'No paired Bluetooth printers were found. Pair the printer in Android settings, then try again.';
+        });
+      }
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _printError = _errorMessage(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDiscoveringBluetooth = false);
       }
     }
   }
@@ -107,7 +162,8 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
 
   Future<void> _print() async {
     final records = _selectedRecords;
-    if (records.isEmpty || _isPrinting) {
+    final selectedPrinter = _selectedPrinter;
+    if (records.isEmpty || _isPrinting || selectedPrinter == null) {
       return;
     }
     setState(() {
@@ -117,6 +173,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
 
     String? jobId;
     PrintJobRepository? repository;
+    LabelPrinter? connectedPrinter;
     try {
       final pdfBytes = await _documentGenerator.generate(
         records: records,
@@ -128,14 +185,14 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       jobId = const Uuid().v4();
       await repository.create(
         id: jobId,
-        printerName: 'System print dialog',
+        printerName: selectedPrinter.name,
         labelLayoutId: _layout.id,
         recordCount: records.length,
         copies: _copies,
       );
-      final device = (await _printer.discover()).single;
-      await _printer.connect(device);
-      final result = await _printer.printLabels(
+      connectedPrinter = _printerCatalog.printerFor(selectedPrinter);
+      await connectedPrinter.connect(selectedPrinter);
+      final result = await connectedPrinter.printLabels(
         PrintRequest(
           recordIds: records
               .map((CatalogueRecord record) => record.id)
@@ -143,9 +200,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
           copies: _copies,
           pdfBytes: pdfBytes,
           documentName: 'LabelHub product labels',
+          labelWidthMm: _layout.widthMm,
+          labelHeightMm: _layout.heightMm,
         ),
       );
-      await _printer.disconnect();
       if (!result.succeeded) {
         throw _PrintException(
           result.message ?? 'The system print dialog failed.',
@@ -162,6 +220,14 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       }
       await _load();
     } finally {
+      if (connectedPrinter != null) {
+        try {
+          await connectedPrinter.disconnect();
+        } on Exception {
+          // The print outcome has already been persisted; a best-effort socket
+          // close must not mask it.
+        }
+      }
       if (mounted) {
         setState(() => _isPrinting = false);
       }
@@ -171,6 +237,9 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   String _errorMessage(Object error) {
     return switch (error) {
       PdfLabelDocumentException exception => exception.message,
+      ThermalPrintingException exception => exception.message,
+      PlatformException exception =>
+        exception.message ?? 'The selected printer could not be reached.',
       _PrintException exception => exception.message,
       _ => 'The labels could not be prepared for printing. Try again.',
     };
@@ -208,7 +277,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 layout: _layout,
                 copies: _copies,
                 selectedRecordCount: _selectedRecords.length,
+                printers: _availablePrinters,
+                selectedPrinter: _selectedPrinter,
                 isPrinting: _isPrinting,
+                isDiscoveringBluetooth: _isDiscoveringBluetooth,
                 errorMessage: _printError,
                 onDecreaseCopies: _copies > 1
                     ? () => setState(() => _copies--)
@@ -222,7 +294,18 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                     });
                   }
                 },
-                onPrint: _selectedRecordIds.isEmpty ? null : _print,
+                onPrinterChanged: (PrinterDevice? printer) {
+                  if (printer != null) {
+                    setState(() {
+                      _selectedPrinter = printer;
+                      _printError = null;
+                    });
+                  }
+                },
+                onDiscoverBluetooth: _discoverBluetoothPrinters,
+                onPrint: _selectedRecordIds.isEmpty || _selectedPrinter == null
+                    ? null
+                    : _print,
               );
               if (constraints.maxWidth >= 840) {
                 return Row(
@@ -256,22 +339,32 @@ class _PrintConfigurationCard extends StatelessWidget {
     required this.layout,
     required this.copies,
     required this.selectedRecordCount,
+    required this.printers,
+    required this.selectedPrinter,
     required this.isPrinting,
+    required this.isDiscoveringBluetooth,
     required this.errorMessage,
     required this.onDecreaseCopies,
     required this.onIncreaseCopies,
     required this.onLayoutChanged,
+    required this.onPrinterChanged,
+    required this.onDiscoverBluetooth,
     required this.onPrint,
   });
 
   final LabelLayout layout;
   final int copies;
   final int selectedRecordCount;
+  final List<PrinterDevice> printers;
+  final PrinterDevice? selectedPrinter;
   final bool isPrinting;
+  final bool isDiscoveringBluetooth;
   final String? errorMessage;
   final VoidCallback? onDecreaseCopies;
   final VoidCallback onIncreaseCopies;
   final ValueChanged<LabelLayout?> onLayoutChanged;
+  final ValueChanged<PrinterDevice?> onPrinterChanged;
+  final VoidCallback onDiscoverBluetooth;
   final VoidCallback? onPrint;
 
   @override
@@ -297,6 +390,47 @@ class _PrintConfigurationCard extends StatelessWidget {
             LabelLayoutSelector(
               selectedLayout: layout,
               onChanged: onLayoutChanged,
+            ),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<PrinterDevice>(
+              key: ValueKey<String?>(selectedPrinter?.id),
+              initialValue: selectedPrinter,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Printer',
+                border: OutlineInputBorder(),
+              ),
+              items: <DropdownMenuItem<PrinterDevice>>[
+                for (final printer in printers)
+                  DropdownMenuItem<PrinterDevice>(
+                    value: printer,
+                    child: Text(printer.name, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: isPrinting ? null : onPrinterChanged,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _printerHint(selectedPrinter),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: isPrinting || isDiscoveringBluetooth
+                  ? null
+                  : onDiscoverBluetooth,
+              icon: isDiscoveringBluetooth
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.bluetooth_searching_rounded),
+              label: Text(
+                isDiscoveringBluetooth
+                    ? 'Checking paired printers…'
+                    : 'Find paired Bluetooth printers',
+              ),
             ),
             const SizedBox(height: 20),
             const Text('Copies per record'),
@@ -350,9 +484,9 @@ class _PrintConfigurationCard extends StatelessWidget {
                       value: '$labelCount',
                     ),
                     const SizedBox(height: 8),
-                    const _PrintSummaryLine(
+                    _PrintSummaryLine(
                       label: 'Output',
-                      value: 'PDF via system print dialog',
+                      value: _printerOutput(selectedPrinter),
                     ),
                   ],
                 ),
@@ -380,6 +514,24 @@ class _PrintConfigurationCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _printerHint(PrinterDevice? printer) {
+    return switch (printer?.kind) {
+      PrinterKind.sunmiInner =>
+        'Print directly to the compatible Sunmi terminal’s internal printer.',
+      PrinterKind.bluetooth =>
+        'Only paired Bluetooth printers are shown. Select the matching receipt or label command mode.',
+      _ => 'Open Android’s system print dialog for PDF-capable printers.',
+    };
+  }
+
+  String _printerOutput(PrinterDevice? printer) {
+    return switch (printer?.protocol) {
+      PrinterProtocol.escPos => 'Direct raster via ESC/POS',
+      PrinterProtocol.tspl => 'Direct raster via TSPL',
+      _ => 'PDF via system print dialog',
+    };
   }
 }
 

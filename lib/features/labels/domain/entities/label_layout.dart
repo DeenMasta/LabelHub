@@ -27,8 +27,19 @@ class LabelLayout {
 }
 
 const productLabelLayout = LabelLayout(
-  id: 'product-label-58x40',
+  id: 'product-label-40x30',
   name: 'Product label',
+  widthMm: 40,
+  heightMm: 30,
+  horizontalPaddingMm: 3,
+  verticalPaddingMm: 3,
+  barcodeWidthMm: 34,
+  barcodeHeightMm: 10,
+);
+
+const wideProductLabelLayout = LabelLayout(
+  id: 'product-label-58x40',
+  name: 'Wide product label',
   widthMm: 58,
   heightMm: 40,
   horizontalPaddingMm: 3,
@@ -50,6 +61,7 @@ const compactProductLabelLayout = LabelLayout(
 
 const productLabelLayouts = <LabelLayout>[
   productLabelLayout,
+  wideProductLabelLayout,
   compactProductLabelLayout,
 ];
 
