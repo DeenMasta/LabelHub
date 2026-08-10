@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 abstract interface class LabelPrinter {
   Future<List<PrinterDevice>> discover();
   Future<void> connect(PrinterDevice device);
@@ -20,10 +22,17 @@ class PrinterDevice {
 enum PrinterKind { systemPdf, bluetooth, usb, network }
 
 class PrintRequest {
-  const PrintRequest({required this.recordIds, required this.copies});
+  const PrintRequest({
+    required this.recordIds,
+    required this.copies,
+    required this.pdfBytes,
+    required this.documentName,
+  });
 
   final List<String> recordIds;
   final int copies;
+  final Uint8List pdfBytes;
+  final String documentName;
 }
 
 class PrintResult {

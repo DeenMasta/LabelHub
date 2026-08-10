@@ -1,10 +1,114 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/theme/app_theme.dart';
+import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
+import '../../records/data/record_repository.dart';
+import '../../records/domain/entities/catalogue_record.dart';
+import '../../templates/data/builtin_templates.dart';
+import '../../templates/domain/entities/import_template.dart';
+import '../data/barcode_preview_service.dart';
+import '../domain/entities/barcode_request.dart';
+import '../domain/entities/label_layout.dart';
+import 'widgets/record_selector_card.dart';
 
-class LabelsPage extends StatelessWidget {
+class LabelsPage extends ConsumerStatefulWidget {
   const LabelsPage({super.key});
+
+  @override
+  ConsumerState<LabelsPage> createState() => _LabelsPageState();
+}
+
+class _LabelsPageState extends ConsumerState<LabelsPage> {
+  static const _barcodeService = BarcodePreviewService();
+
+  final Set<String> _selectedRecordIds = <String>{};
+  List<CatalogueRecord> _records = const <CatalogueRecord>[];
+  BarcodePreview? _barcodePreview;
+  Object? _loadError;
+  String _primaryFieldKey = 'item_name';
+  String _secondaryFieldKey = 'price';
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRecords());
+  }
+
+  CatalogueRecord? get _previewRecord {
+    for (final record in _records) {
+      if (_selectedRecordIds.contains(record.id)) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _loadRecords() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      final records = (await RecordRepository(
+        database,
+      ).list()).where((CatalogueRecord record) => !record.isArchived).toList();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _records = records;
+        if (records.length == 1) {
+          _selectedRecordIds.add(records.single.id);
+        }
+        _refreshBarcodePreview();
+      });
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _loadError = error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _toggleRecord(CatalogueRecord record, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedRecordIds.add(record.id);
+      } else {
+        _selectedRecordIds.remove(record.id);
+      }
+      _refreshBarcodePreview();
+    });
+  }
+
+  void _refreshBarcodePreview() {
+    final record = _previewRecord;
+    if (record == null) {
+      _barcodePreview = null;
+      return;
+    }
+    _barcodePreview = _barcodeService.create(
+      BarcodeRequest(
+        value: record.barcodeValue,
+        format: productTemplate.barcodeFormat,
+        widthMm: productLabelLayout.barcodeWidthMm,
+        heightMm: productLabelLayout.barcodeHeightMm,
+        showText: false,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,57 +116,122 @@ class LabelsPage extends StatelessWidget {
       children: <Widget>[
         const PageHeading(
           eyebrow: 'Output',
-          title: 'Labels & printing',
+          title: 'Label preview',
           description:
-              'Your saved records will appear here as soon as label layouts and printing are configured.',
+              'Select active records, check the fixed product layout, and confirm barcode data before printing.',
         ),
-        const SizedBox(height: 24),
-        const _PrintingStatusPanel(),
+        const SizedBox(height: 20),
+        const _LabelLayoutSummary(layout: productLabelLayout),
         const SizedBox(height: 16),
-        const _PrintCapabilityList(),
+        if (_isLoading)
+          const _LabelsLoadingPanel()
+        else if (_loadError != null)
+          _LabelsLoadError(onRetry: _loadRecords)
+        else if (_records.isEmpty)
+          _NoRecordsForLabels(onImport: () => context.go('/imports'))
+        else
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final selector = RecordSelectorCard(
+                records: _records,
+                selectedRecordIds: _selectedRecordIds,
+                onChanged: _toggleRecord,
+              );
+              final preview = _LabelPreviewPanel(
+                record: _previewRecord,
+                selectedCount: _selectedRecordIds.length,
+                primaryFieldKey: _primaryFieldKey,
+                secondaryFieldKey: _secondaryFieldKey,
+                barcodePreview: _barcodePreview,
+                onPrimaryFieldChanged: (String? key) {
+                  if (key != null) {
+                    setState(() => _primaryFieldKey = key);
+                  }
+                },
+                onSecondaryFieldChanged: (String? key) {
+                  if (key != null) {
+                    setState(() => _secondaryFieldKey = key);
+                  }
+                },
+                onPreparePrint: _selectedRecordIds.isEmpty
+                    ? null
+                    : () => context.go(
+                        '/printing',
+                        extra: _selectedRecordIds.toList(growable: false),
+                      ),
+              );
+              if (constraints.maxWidth >= 840) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(flex: 4, child: selector),
+                    const SizedBox(width: 20),
+                    Expanded(flex: 5, child: preview),
+                  ],
+                );
+              }
+              return Column(
+                children: <Widget>[
+                  selector,
+                  const SizedBox(height: 16),
+                  preview,
+                ],
+              );
+            },
+          ),
       ],
     );
   }
 }
 
-class _PrintingStatusPanel extends StatelessWidget {
-  const _PrintingStatusPanel();
+class _LabelLayoutSummary extends StatelessWidget {
+  const _LabelLayoutSummary({required this.layout});
+
+  final LabelLayout layout;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: Color(0xFF292D2D),
-        borderRadius: BorderRadius.all(Radius.circular(24)),
-      ),
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
+        padding: const EdgeInsets.all(16),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                color: Color(0xFF3C4241),
+            DecoratedBox(
+              decoration: const BoxDecoration(
+                color: AppTheme.paleBlue,
                 borderRadius: BorderRadius.all(Radius.circular(12)),
               ),
-              child: SizedBox(
+              child: const SizedBox(
                 width: 44,
                 height: 44,
-                child: Icon(Icons.print_outlined, color: Colors.white),
+                child: Icon(Icons.straighten_outlined, color: AppTheme.navy),
               ),
             ),
-            const SizedBox(height: 20),
-            Text(
-              'Print-ready layouts are next',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    layout.name,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm · Code 128',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF5F6B65),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Fixed layout with configurable product-field bindings.',
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'LabelHub keeps the physical dimensions in millimetres, then renders barcodes and layouts at the print boundary.',
-              style: TextStyle(color: Color(0xFFC5CECA), height: 1.45),
             ),
           ],
         ),
@@ -71,67 +240,430 @@ class _PrintingStatusPanel extends StatelessWidget {
   }
 }
 
-class _PrintCapabilityList extends StatelessWidget {
-  const _PrintCapabilityList();
+class _LabelPreviewPanel extends StatelessWidget {
+  const _LabelPreviewPanel({
+    required this.record,
+    required this.selectedCount,
+    required this.primaryFieldKey,
+    required this.secondaryFieldKey,
+    required this.barcodePreview,
+    required this.onPrimaryFieldChanged,
+    required this.onSecondaryFieldChanged,
+    required this.onPreparePrint,
+  });
+
+  final CatalogueRecord? record;
+  final int selectedCount;
+  final String primaryFieldKey;
+  final String secondaryFieldKey;
+  final BarcodePreview? barcodePreview;
+  final ValueChanged<String?> onPrimaryFieldChanged;
+  final ValueChanged<String?> onSecondaryFieldChanged;
+  final VoidCallback? onPreparePrint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _FieldBindingCard(
+          primaryFieldKey: primaryFieldKey,
+          secondaryFieldKey: secondaryFieldKey,
+          onPrimaryFieldChanged: onPrimaryFieldChanged,
+          onSecondaryFieldChanged: onSecondaryFieldChanged,
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        'Preview',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    Text(
+                      '$selectedCount selected',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF5F6B65),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: onPreparePrint,
+                  icon: const Icon(Icons.print_outlined),
+                  label: const Text('Prepare print'),
+                ),
+                const SizedBox(height: 16),
+                if (record == null)
+                  const _SelectRecordPrompt()
+                else if (barcodePreview case final BarcodePreview preview?
+                    when !preview.isValid)
+                  _BarcodeValidationPanel(message: preview.errorMessage!)
+                else if (barcodePreview case final BarcodePreview preview?)
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: AspectRatio(
+                        aspectRatio: productLabelLayout.aspectRatio,
+                        child: _LabelPreviewSurface(
+                          record: record!,
+                          primaryFieldKey: primaryFieldKey,
+                          secondaryFieldKey: secondaryFieldKey,
+                          barcodePreview: preview,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FieldBindingCard extends StatelessWidget {
+  const _FieldBindingCard({
+    required this.primaryFieldKey,
+    required this.secondaryFieldKey,
+    required this.onPrimaryFieldChanged,
+    required this.onSecondaryFieldChanged,
+  });
+
+  final String primaryFieldKey;
+  final String secondaryFieldKey;
+  final ValueChanged<String?> onPrimaryFieldChanged;
+  final ValueChanged<String?> onSecondaryFieldChanged;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Column(
-        children: const <Widget>[
-          _PrintCapabilityRow(
-            icon: Icons.straighten_outlined,
-            title: 'Accurate physical sizing',
-            detail:
-                'Millimetres are converted to PDF points and printer dots only when needed.',
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Field bindings',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            const Text('Choose the imported values shown above the barcode.'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: primaryFieldKey,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Primary field'),
+              items: _fieldItems(),
+              onChanged: onPrimaryFieldChanged,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: secondaryFieldKey,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Secondary field'),
+              items: _fieldItems(),
+              onChanged: onSecondaryFieldChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<DropdownMenuItem<String>> _fieldItems() {
+    return productTemplate.fields
+        .map(
+          (TemplateField field) => DropdownMenuItem<String>(
+            value: field.key,
+            child: Text(field.displayName),
           ),
-          Divider(height: 1),
-          _PrintCapabilityRow(
-            icon: Icons.qr_code_2_outlined,
-            title: 'Barcode-ready records',
-            detail:
-                'Code 128, Code 39, EAN-13, and QR code formats are supported.',
+        )
+        .toList();
+  }
+}
+
+class _LabelPreviewSurface extends StatelessWidget {
+  const _LabelPreviewSurface({
+    required this.record,
+    required this.primaryFieldKey,
+    required this.secondaryFieldKey,
+    required this.barcodePreview,
+  });
+
+  final CatalogueRecord record;
+  final String primaryFieldKey;
+  final String secondaryFieldKey;
+  final BarcodePreview barcodePreview;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final pixelsPerMm = constraints.maxWidth / productLabelLayout.widthMm;
+        final horizontalPadding =
+            productLabelLayout.horizontalPaddingMm * pixelsPerMm;
+        final verticalPadding =
+            productLabelLayout.verticalPaddingMm * pixelsPerMm;
+        final barcodeWidth = productLabelLayout.barcodeWidthMm * pixelsPerMm;
+        final barcodeHeight = productLabelLayout.barcodeHeightMm * pixelsPerMm;
+        final barcodeTop =
+            constraints.maxHeight -
+            verticalPadding -
+            barcodeHeight -
+            (3 * pixelsPerMm);
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: AppTheme.border),
+            borderRadius: BorderRadius.circular(12),
           ),
-        ],
+          child: Stack(
+            children: <Widget>[
+              Positioned(
+                top: verticalPadding,
+                left: horizontalPadding,
+                right: horizontalPadding,
+                child: Text(
+                  record.values[primaryFieldKey]?.trim().isNotEmpty == true
+                      ? record.values[primaryFieldKey]!
+                      : '—',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 3.8 * pixelsPerMm,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.navy,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: verticalPadding + (5 * pixelsPerMm),
+                left: horizontalPadding,
+                right: horizontalPadding,
+                child: Text(
+                  record.values[secondaryFieldKey]?.trim().isNotEmpty == true
+                      ? record.values[secondaryFieldKey]!
+                      : '—',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 2.6 * pixelsPerMm,
+                    color: AppTheme.navy,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: barcodeTop,
+                left: horizontalPadding,
+                width: barcodeWidth,
+                height: barcodeHeight,
+                child: _BarcodeGraphic(preview: barcodePreview),
+              ),
+              Positioned(
+                top: barcodeTop + barcodeHeight,
+                left: horizontalPadding,
+                width: barcodeWidth,
+                height: 3 * pixelsPerMm,
+                child: Center(
+                  child: Text(
+                    record.barcodeValue,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 2 * pixelsPerMm,
+                      letterSpacing: .5,
+                      color: AppTheme.navy,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BarcodeGraphic extends StatelessWidget {
+  const _BarcodeGraphic({required this.preview});
+
+  final BarcodePreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _BarcodePainter(preview));
+  }
+}
+
+class _BarcodePainter extends CustomPainter {
+  const _BarcodePainter(this.preview);
+
+  final BarcodePreview preview;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scaleX = size.width / preview.widthMm;
+    final scaleY = size.height / preview.heightMm;
+    final paint = Paint()..color = AppTheme.navy;
+    for (final mark in preview.marks) {
+      canvas.drawRect(
+        Rect.fromLTWH(
+          mark.leftMm * scaleX,
+          mark.topMm * scaleY,
+          mark.widthMm * scaleX,
+          mark.heightMm * scaleY,
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarcodePainter oldDelegate) =>
+      oldDelegate.preview != preview;
+}
+
+class _LabelsLoadingPanel extends StatelessWidget {
+  const _LabelsLoadingPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: CircularProgressIndicator(),
       ),
     );
   }
 }
 
-class _PrintCapabilityRow extends StatelessWidget {
-  const _PrintCapabilityRow({
-    required this.icon,
-    required this.title,
-    required this.detail,
-  });
+class _LabelsLoadError extends StatelessWidget {
+  const _LabelsLoadError({required this.onRetry});
 
-  final IconData icon;
-  final String title;
-  final String detail;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(icon, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 4),
-                Text(detail, style: Theme.of(context).textTheme.bodySmall),
-              ],
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Records could not be loaded',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            const Text(
+              'Try again. Your locally stored records have not been changed.',
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoRecordsForLabels extends StatelessWidget {
+  const _NoRecordsForLabels({required this.onImport});
+
+  final VoidCallback onImport;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: <Widget>[
+            const Icon(
+              Icons.inventory_2_outlined,
+              size: 40,
+              color: AppTheme.navy,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Import active records to preview labels',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Archived records are intentionally excluded from label preparation.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onImport,
+              icon: const Icon(Icons.file_upload_outlined),
+              label: const Text('Import CSV'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectRecordPrompt extends StatelessWidget {
+  const _SelectRecordPrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 36),
+      child: Center(
+        child: Text('Select one or more records to generate a label preview.'),
+      ),
+    );
+  }
+}
+
+class _BarcodeValidationPanel extends StatelessWidget {
+  const _BarcodeValidationPanel({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              Icons.error_outline_rounded,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('This record cannot be previewed: $message')),
+          ],
+        ),
       ),
     );
   }

@@ -86,6 +86,19 @@ class AppDatabase {
     await _executor.runCustom(
       'CREATE INDEX IF NOT EXISTS records_barcode_idx ON records(barcode_value)',
     );
+    await _executor.runCustom('''
+      CREATE TABLE IF NOT EXISTS print_jobs (
+        id TEXT PRIMARY KEY NOT NULL,
+        printer_name TEXT NOT NULL,
+        label_layout_id TEXT NOT NULL,
+        record_count INTEGER NOT NULL,
+        copies INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        error_message TEXT
+      )
+    ''');
   }
 
   Future<void> close() => _executor.close();
@@ -220,6 +233,67 @@ class AppDatabase {
     ]);
   }
 
+  Future<void> savePrintJob({
+    required String id,
+    required String printerName,
+    required String labelLayoutId,
+    required int recordCount,
+    required int copies,
+    required String status,
+  }) {
+    return _executor.runInsert(
+      '''
+        INSERT INTO print_jobs (
+          id, printer_name, label_layout_id, record_count, copies, status,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ''',
+      <Object?>[
+        id,
+        printerName,
+        labelLayoutId,
+        recordCount,
+        copies,
+        status,
+        DateTime.now().toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<void> completePrintJob({
+    required String id,
+    required String status,
+    String? errorMessage,
+  }) {
+    return _executor.runUpdate(
+      '''
+        UPDATE print_jobs
+        SET status = ?, completed_at = ?, error_message = ?
+        WHERE id = ?
+      ''',
+      <Object?>[
+        status,
+        DateTime.now().toUtc().toIso8601String(),
+        errorMessage,
+        id,
+      ],
+    );
+  }
+
+  Future<List<DatabasePrintJob>> printJobs({int limit = 10}) async {
+    final rows = await _executor.runSelect(
+      '''
+        SELECT id, printer_name, label_layout_id, record_count, copies, status,
+          created_at, completed_at, error_message
+        FROM print_jobs
+        ORDER BY created_at DESC
+        LIMIT ?
+      ''',
+      <Object?>[limit],
+    );
+    return rows.map(DatabasePrintJob.fromRow).toList();
+  }
+
   Future<void> saveImportBatch({
     required String batchId,
     required String templateId,
@@ -345,4 +419,45 @@ class DatabaseRecord {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isArchived;
+}
+
+/// A locally stored attempt to create and hand off a label print job.
+class DatabasePrintJob {
+  const DatabasePrintJob({
+    required this.id,
+    required this.printerName,
+    required this.labelLayoutId,
+    required this.recordCount,
+    required this.copies,
+    required this.status,
+    required this.createdAt,
+    required this.completedAt,
+    required this.errorMessage,
+  });
+
+  factory DatabasePrintJob.fromRow(Map<String, Object?> row) {
+    return DatabasePrintJob(
+      id: row['id'] as String,
+      printerName: row['printer_name'] as String,
+      labelLayoutId: row['label_layout_id'] as String,
+      recordCount: row['record_count'] as int,
+      copies: row['copies'] as int,
+      status: row['status'] as String,
+      createdAt: DateTime.parse(row['created_at'] as String),
+      completedAt: row['completed_at'] == null
+          ? null
+          : DateTime.parse(row['completed_at'] as String),
+      errorMessage: row['error_message'] as String?,
+    );
+  }
+
+  final String id;
+  final String printerName;
+  final String labelLayoutId;
+  final int recordCount;
+  final int copies;
+  final String status;
+  final DateTime createdAt;
+  final DateTime? completedAt;
+  final String? errorMessage;
 }

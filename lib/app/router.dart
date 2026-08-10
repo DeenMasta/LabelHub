@@ -6,6 +6,7 @@ import '../core/presentation/widgets/primary_navigation_bar.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/imports/presentation/imports_page.dart';
 import '../features/labels/presentation/labels_page.dart';
+import '../features/printing/presentation/printing_page.dart';
 import '../features/records/presentation/records_page.dart';
 import '../features/records/presentation/record_details_page.dart';
 import '../features/templates/presentation/templates_page.dart';
@@ -28,6 +29,16 @@ final GoRouter appRouter = GoRouter(
               RecordDetailsPage(recordId: state.pathParameters['recordId']!),
         ),
         GoRoute(path: '/labels', builder: (_, _) => const LabelsPage()),
+        GoRoute(
+          path: '/printing',
+          builder: (_, GoRouterState state) {
+            final initialRecordIds = switch (state.extra) {
+              final List<String> ids => ids,
+              _ => const <String>[],
+            };
+            return PrintingPage(initialRecordIds: initialRecordIds);
+          },
+        ),
       ],
     ),
   ],
