@@ -27,7 +27,11 @@ void main() {
 
   test('reports required fields, invalid numbers, and duplicate barcodes', () {
     final result = validator.validate(
-      template: productTemplate,
+      template: productTemplate.withRequiredFieldKeys(<String>{
+        'item_code',
+        'item_name',
+        'barcode',
+      }),
       headers: const <String>['item_code', 'item_name', 'barcode', 'price'],
       rows: const <List<String>>[
         <String>['', 'Blue T-Shirt', '9551234567890', 'not-a-price'],
@@ -55,5 +59,23 @@ void main() {
       result.rows.last.issues.single.message,
       'Barcode already exists or is duplicated in this file.',
     );
+  });
+
+  test('allows an unrequired product code to be blank', () {
+    final result = validator.validate(
+      template: productTemplate,
+      headers: const <String>['item_code', 'item_name', 'barcode'],
+      rows: const <List<String>>[
+        <String>['', 'Blue T-Shirt', 'ITEM-1001'],
+      ],
+      columnMapping: const <String, String?>{
+        'item_code': 'item_code',
+        'item_name': 'item_name',
+        'barcode': 'barcode',
+      },
+      existingBarcodeValues: const <String>{},
+    );
+
+    expect(result.validRowCount, 1);
   });
 }

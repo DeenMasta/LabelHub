@@ -9,8 +9,8 @@ import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../../core/validation/import_validation_service.dart';
-import '../../templates/data/builtin_templates.dart';
 import '../../templates/domain/entities/import_template.dart';
+import '../../templates/presentation/active_product_template_provider.dart';
 import '../data/csv_import_parser.dart';
 import '../data/import_repository.dart';
 
@@ -31,7 +31,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
   bool _isPicking = false;
   bool _isSaving = false;
 
-  Future<void> _chooseCsv() async {
+  Future<void> _chooseCsv(ImportTemplate template) async {
     setState(() => _isPicking = true);
     try {
       final result = await FilePicker.pickFiles(
@@ -53,7 +53,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
         _fileName = file.name;
         _validation = null;
         _mapping = <String, String?>{
-          for (final field in productTemplate.fields)
+          for (final field in template.fields)
             field.key: document.headers.contains(field.key) ? field.key : null,
         };
       });
@@ -68,7 +68,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
     }
   }
 
-  Future<void> _validate() async {
+  Future<void> _validate(ImportTemplate template) async {
     final document = _document;
     if (document == null) {
       return;
@@ -76,11 +76,9 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
     try {
       final database = await ref.read(appDatabaseProvider.future);
       final repository = ImportRepository(database);
-      final existingBarcodes = await repository.existingBarcodes(
-        productTemplate,
-      );
+      final existingBarcodes = await repository.existingBarcodes(template);
       final validation = _validator.validate(
-        template: productTemplate,
+        template: template,
         headers: document.headers,
         rows: document.rows,
         columnMapping: _mapping,
@@ -94,7 +92,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
     }
   }
 
-  Future<void> _saveValidRows() async {
+  Future<void> _saveValidRows(ImportTemplate template) async {
     final validation = _validation;
     if (validation == null ||
         validation.validRowCount == 0 ||
@@ -105,7 +103,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
     try {
       final database = await ref.read(appDatabaseProvider.future);
       await ImportRepository(database).saveValidRows(
-        template: productTemplate,
+        template: template,
         fileName: _fileName!,
         validation: validation,
       );
@@ -139,6 +137,11 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
   @override
   Widget build(BuildContext context) {
     final document = _document;
+    final templateState = ref.watch(activeProductTemplateProvider);
+    final template = switch (templateState) {
+      AsyncData<ImportTemplate>(:final value) => value,
+      _ => null,
+    };
     return AppPageContent(
       children: <Widget>[
         const PageHeading(
@@ -148,72 +151,100 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
               'Bring in a product CSV, check every row, then add only valid records to your catalogue.',
         ),
         const SizedBox(height: 20),
-        _ImportWorkflowSteps(
-          hasFile: document != null,
-          hasValidation: _validation != null,
-        ),
-        const SizedBox(height: 20),
-        _TemplateSummaryCard(template: productTemplate),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _isPicking ? null : _chooseCsv,
-            icon: _isPicking
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.file_open_outlined),
-            label: Text(
-              document == null ? 'Choose CSV file' : 'Choose another CSV',
+        if (template == null)
+          _TemplateLoadingOrError(hasError: templateState.hasError)
+        else ...<Widget>[
+          _ImportWorkflowSteps(
+            hasFile: document != null,
+            hasValidation: _validation != null,
+          ),
+          const SizedBox(height: 20),
+          _TemplateSummaryCard(template: template),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _isPicking ? null : () => _chooseCsv(template),
+              icon: _isPicking
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.file_open_outlined),
+              label: Text(
+                document == null ? 'Choose CSV file' : 'Choose another CSV',
+              ),
             ),
           ),
-        ),
-        if (document != null) ...<Widget>[
-          const SizedBox(height: 20),
-          _ColumnMappingCard(
-            headers: document.headers,
-            template: productTemplate,
-            mapping: _mapping,
-            onChanged: (String fieldKey, String? header) {
-              setState(() {
-                _mapping = <String, String?>{..._mapping, fieldKey: header};
-                _validation = null;
-              });
-            },
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _validate,
-            icon: const Icon(Icons.fact_check_outlined),
-            label: Text('Validate ${document.rows.length} rows'),
-          ),
-        ],
-        if (_validation case final validation?) ...<Widget>[
-          const SizedBox(height: 20),
-          _ValidationSummaryCard(validation: validation),
-          if (validation.invalidRowCount > 0) ...<Widget>[
-            const SizedBox(height: 12),
-            _ValidationIssueList(validation: validation),
+          if (document != null) ...<Widget>[
+            const SizedBox(height: 20),
+            _ColumnMappingCard(
+              headers: document.headers,
+              template: template,
+              mapping: _mapping,
+              onChanged: (String fieldKey, String? header) {
+                setState(() {
+                  _mapping = <String, String?>{..._mapping, fieldKey: header};
+                  _validation = null;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => _validate(template),
+              icon: const Icon(Icons.fact_check_outlined),
+              label: Text('Validate ${document.rows.length} rows'),
+            ),
           ],
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _isSaving || validation.validRowCount == 0
-                ? null
-                : _saveValidRows,
-            icon: _isSaving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text('Import ${validation.validRowCount} valid rows'),
-          ),
+          if (_validation case final validation?) ...<Widget>[
+            const SizedBox(height: 20),
+            _ValidationSummaryCard(validation: validation),
+            if (validation.invalidRowCount > 0) ...<Widget>[
+              const SizedBox(height: 12),
+              _ValidationIssueList(validation: validation),
+            ],
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _isSaving || validation.validRowCount == 0
+                  ? null
+                  : () => _saveValidRows(template),
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text('Import ${validation.validRowCount} valid rows'),
+            ),
+          ],
         ],
       ],
+    );
+  }
+}
+
+class _TemplateLoadingOrError extends StatelessWidget {
+  const _TemplateLoadingOrError({required this.hasError});
+
+  final bool hasError;
+
+  @override
+  Widget build(BuildContext context) {
+    if (hasError) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text('Template settings could not be loaded.'),
+        ),
+      );
+    }
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: CircularProgressIndicator(),
+      ),
     );
   }
 }

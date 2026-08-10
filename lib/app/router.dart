@@ -36,7 +36,10 @@ final GoRouter appRouter = GoRouter(
               final List<String> ids => ids,
               _ => const <String>[],
             };
-            return PrintingPage(initialRecordIds: initialRecordIds);
+            return PrintingPage(
+              initialRecordIds: initialRecordIds,
+              initialLayoutId: state.uri.queryParameters['layout'],
+            );
           },
         ),
       ],

@@ -6,8 +6,8 @@ import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../../core/validation/import_validation_service.dart';
-import '../../templates/data/builtin_templates.dart';
 import '../../templates/domain/entities/import_template.dart';
+import '../../templates/presentation/active_product_template_provider.dart';
 import '../data/record_repository.dart';
 import '../domain/entities/catalogue_record.dart';
 
@@ -52,11 +52,12 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
   Future<void> _loadRecord() async {
     try {
       final record = await (await _repository()).getById(widget.recordId);
+      final template = await ref.read(activeProductTemplateProvider.future);
       if (!mounted) {
         return;
       }
       if (record != null) {
-        for (final field in productTemplate.fields) {
+        for (final field in template.fields) {
           _controllers[field.key] = TextEditingController(
             text: record.values[field.key] ?? '',
           );
@@ -74,13 +75,13 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
     }
   }
 
-  Future<void> _save() async {
+  Future<void> _save(ImportTemplate template) async {
     final record = _record;
     if (record == null || !_formKey.currentState!.validate()) {
       return;
     }
     final values = <String, String>{
-      for (final field in productTemplate.fields)
+      for (final field in template.fields)
         field.key: _controllers[field.key]!.text.trim(),
     };
     final updated = record.copyWith(
@@ -91,13 +92,13 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
     final repository = await _repository();
     final hasDuplicate = await repository.hasDuplicateBarcode(updated);
     final validation = _validator.validate(
-      template: productTemplate,
-      headers: productTemplate.fields.map((field) => field.key).toList(),
+      template: template,
+      headers: template.fields.map((field) => field.key).toList(),
       rows: <List<String>>[
-        productTemplate.fields.map((field) => values[field.key] ?? '').toList(),
+        template.fields.map((field) => values[field.key] ?? '').toList(),
       ],
       columnMapping: <String, String?>{
-        for (final field in productTemplate.fields) field.key: field.key,
+        for (final field in template.fields) field.key: field.key,
       },
       existingBarcodeValues: hasDuplicate
           ? <String>{updated.barcodeValue}
@@ -264,6 +265,31 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
         ],
       );
     }
+    final templateState = ref.watch(activeProductTemplateProvider);
+    if (templateState.isLoading) {
+      return const AppPageContent(
+        children: <Widget>[
+          Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        ],
+      );
+    }
+    if (templateState.hasError) {
+      return const AppPageContent(
+        children: <Widget>[
+          PageHeading(
+            eyebrow: 'Catalogue',
+            title: 'Template unavailable',
+            description: 'The field requirements could not be loaded.',
+          ),
+        ],
+      );
+    }
+    final template = templateState.requireValue;
     return AppPageContent(
       children: <Widget>[
         PageHeading(
@@ -288,7 +314,7 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  for (final field in productTemplate.fields) ...<Widget>[
+                  for (final field in template.fields) ...<Widget>[
                     TextFormField(
                       controller: _controllers[field.key],
                       enabled: !record.isArchived && !_isSaving,
@@ -322,7 +348,7 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _isSaving ? null : _save,
+              onPressed: _isSaving ? null : () => _save(template),
               icon: _isSaving
                   ? const SizedBox(
                       width: 18,

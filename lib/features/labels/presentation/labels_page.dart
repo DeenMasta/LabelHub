@@ -13,6 +13,7 @@ import '../../templates/domain/entities/import_template.dart';
 import '../data/barcode_preview_service.dart';
 import '../domain/entities/barcode_request.dart';
 import '../domain/entities/label_layout.dart';
+import 'widgets/label_layout_selector.dart';
 import 'widgets/record_selector_card.dart';
 
 class LabelsPage extends ConsumerStatefulWidget {
@@ -31,6 +32,7 @@ class _LabelsPageState extends ConsumerState<LabelsPage> {
   Object? _loadError;
   String _primaryFieldKey = 'item_name';
   String _secondaryFieldKey = 'price';
+  LabelLayout _layout = productLabelLayout;
   bool _isLoading = true;
 
   @override
@@ -103,8 +105,8 @@ class _LabelsPageState extends ConsumerState<LabelsPage> {
       BarcodeRequest(
         value: record.barcodeValue,
         format: productTemplate.barcodeFormat,
-        widthMm: productLabelLayout.barcodeWidthMm,
-        heightMm: productLabelLayout.barcodeHeightMm,
+        widthMm: _layout.barcodeWidthMm,
+        heightMm: _layout.barcodeHeightMm,
         showText: false,
       ),
     );
@@ -121,7 +123,19 @@ class _LabelsPageState extends ConsumerState<LabelsPage> {
               'Select active records, check the fixed product layout, and confirm barcode data before printing.',
         ),
         const SizedBox(height: 20),
-        const _LabelLayoutSummary(layout: productLabelLayout),
+        _LabelLayoutSummary(layout: _layout),
+        const SizedBox(height: 12),
+        LabelLayoutSelector(
+          selectedLayout: _layout,
+          onChanged: (LabelLayout? layout) {
+            if (layout != null) {
+              setState(() {
+                _layout = layout;
+                _refreshBarcodePreview();
+              });
+            }
+          },
+        ),
         const SizedBox(height: 16),
         if (_isLoading)
           const _LabelsLoadingPanel()
@@ -142,6 +156,7 @@ class _LabelsPageState extends ConsumerState<LabelsPage> {
                 selectedCount: _selectedRecordIds.length,
                 primaryFieldKey: _primaryFieldKey,
                 secondaryFieldKey: _secondaryFieldKey,
+                layout: _layout,
                 barcodePreview: _barcodePreview,
                 onPrimaryFieldChanged: (String? key) {
                   if (key != null) {
@@ -156,7 +171,7 @@ class _LabelsPageState extends ConsumerState<LabelsPage> {
                 onPreparePrint: _selectedRecordIds.isEmpty
                     ? null
                     : () => context.go(
-                        '/printing',
+                        '/printing?layout=${_layout.id}',
                         extra: _selectedRecordIds.toList(growable: false),
                       ),
               );
@@ -246,6 +261,7 @@ class _LabelPreviewPanel extends StatelessWidget {
     required this.selectedCount,
     required this.primaryFieldKey,
     required this.secondaryFieldKey,
+    required this.layout,
     required this.barcodePreview,
     required this.onPrimaryFieldChanged,
     required this.onSecondaryFieldChanged,
@@ -256,6 +272,7 @@ class _LabelPreviewPanel extends StatelessWidget {
   final int selectedCount;
   final String primaryFieldKey;
   final String secondaryFieldKey;
+  final LabelLayout layout;
   final BarcodePreview? barcodePreview;
   final ValueChanged<String?> onPrimaryFieldChanged;
   final ValueChanged<String?> onSecondaryFieldChanged;
@@ -313,9 +330,10 @@ class _LabelPreviewPanel extends StatelessWidget {
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 420),
                       child: AspectRatio(
-                        aspectRatio: productLabelLayout.aspectRatio,
+                        aspectRatio: layout.aspectRatio,
                         child: _LabelPreviewSurface(
                           record: record!,
+                          layout: layout,
                           primaryFieldKey: primaryFieldKey,
                           secondaryFieldKey: secondaryFieldKey,
                           barcodePreview: preview,
@@ -398,12 +416,14 @@ class _FieldBindingCard extends StatelessWidget {
 class _LabelPreviewSurface extends StatelessWidget {
   const _LabelPreviewSurface({
     required this.record,
+    required this.layout,
     required this.primaryFieldKey,
     required this.secondaryFieldKey,
     required this.barcodePreview,
   });
 
   final CatalogueRecord record;
+  final LabelLayout layout;
   final String primaryFieldKey;
   final String secondaryFieldKey;
   final BarcodePreview barcodePreview;
@@ -412,13 +432,11 @@ class _LabelPreviewSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final pixelsPerMm = constraints.maxWidth / productLabelLayout.widthMm;
-        final horizontalPadding =
-            productLabelLayout.horizontalPaddingMm * pixelsPerMm;
-        final verticalPadding =
-            productLabelLayout.verticalPaddingMm * pixelsPerMm;
-        final barcodeWidth = productLabelLayout.barcodeWidthMm * pixelsPerMm;
-        final barcodeHeight = productLabelLayout.barcodeHeightMm * pixelsPerMm;
+        final pixelsPerMm = constraints.maxWidth / layout.widthMm;
+        final horizontalPadding = layout.horizontalPaddingMm * pixelsPerMm;
+        final verticalPadding = layout.verticalPaddingMm * pixelsPerMm;
+        final barcodeWidth = layout.barcodeWidthMm * pixelsPerMm;
+        final barcodeHeight = layout.barcodeHeightMm * pixelsPerMm;
         final barcodeTop =
             constraints.maxHeight -
             verticalPadding -

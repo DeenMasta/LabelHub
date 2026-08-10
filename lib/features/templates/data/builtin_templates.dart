@@ -11,7 +11,7 @@ const productTemplate = ImportTemplate(
       key: 'item_code',
       displayName: 'Item code',
       dataType: FieldDataType.text,
-      required: true,
+      required: false,
       example: 'ITEM-1001',
     ),
     TemplateField(

@@ -18,6 +18,22 @@ class ImportTemplate {
   final List<TemplateField> fields;
   final String barcodeFieldKey;
   final BarcodeFormat barcodeFormat;
+
+  ImportTemplate withRequiredFieldKeys(Set<String> requiredFieldKeys) {
+    return ImportTemplate(
+      id: id,
+      name: name,
+      description: description,
+      barcodeFieldKey: barcodeFieldKey,
+      barcodeFormat: barcodeFormat,
+      fields: fields
+          .map(
+            (TemplateField field) =>
+                field.copyWith(required: requiredFieldKeys.contains(field.key)),
+          )
+          .toList(),
+    );
+  }
 }
 
 class TemplateField {
@@ -34,4 +50,14 @@ class TemplateField {
   final FieldDataType dataType;
   final bool required;
   final String? example;
+
+  TemplateField copyWith({bool? required}) {
+    return TemplateField(
+      key: key,
+      displayName: displayName,
+      dataType: dataType,
+      required: required ?? this.required,
+      example: example,
+    );
+  }
 }

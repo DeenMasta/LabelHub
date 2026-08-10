@@ -10,6 +10,7 @@ import '../../../core/printing/system_pdf_printer.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
+import '../../labels/presentation/widgets/label_layout_selector.dart';
 import '../../labels/presentation/widgets/record_selector_card.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
@@ -18,9 +19,14 @@ import '../data/print_job_repository.dart';
 import '../domain/entities/print_job.dart';
 
 class PrintingPage extends ConsumerStatefulWidget {
-  const PrintingPage({this.initialRecordIds = const <String>[], super.key});
+  const PrintingPage({
+    this.initialRecordIds = const <String>[],
+    this.initialLayoutId,
+    super.key,
+  });
 
   final List<String> initialRecordIds;
+  final String? initialLayoutId;
 
   @override
   ConsumerState<PrintingPage> createState() => _PrintingPageState();
@@ -38,11 +44,13 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   bool _isLoading = true;
   bool _isPrinting = false;
   int _copies = 1;
+  LabelLayout _layout = productLabelLayout;
 
   @override
   void initState() {
     super.initState();
     _selectedRecordIds.addAll(widget.initialRecordIds);
+    _layout = productLabelLayoutForId(widget.initialLayoutId);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -113,6 +121,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       final pdfBytes = await _documentGenerator.generate(
         records: records,
         copies: _copies,
+        layout: _layout,
       );
       final database = await ref.read(appDatabaseProvider.future);
       repository = PrintJobRepository(database);
@@ -120,7 +129,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       await repository.create(
         id: jobId,
         printerName: 'System print dialog',
-        labelLayoutId: 'product-label-58x40',
+        labelLayoutId: _layout.id,
         recordCount: records.length,
         copies: _copies,
       );
@@ -171,11 +180,11 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   Widget build(BuildContext context) {
     return AppPageContent(
       children: <Widget>[
-        const PageHeading(
+        PageHeading(
           eyebrow: 'Output',
           title: 'Print labels',
           description:
-              'Generate a physically sized 58 × 40 mm PDF and hand it to the device print system.',
+              'Generate a physically sized ${_layout.widthMm.toStringAsFixed(0)} × ${_layout.heightMm.toStringAsFixed(0)} mm PDF and hand it to the device print system.',
         ),
         const SizedBox(height: 20),
         if (_isLoading)
@@ -196,6 +205,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 onChanged: _toggleRecord,
               );
               final configuration = _PrintConfigurationCard(
+                layout: _layout,
                 copies: _copies,
                 selectedRecordCount: _selectedRecords.length,
                 isPrinting: _isPrinting,
@@ -204,6 +214,14 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                     ? () => setState(() => _copies--)
                     : null,
                 onIncreaseCopies: () => setState(() => _copies++),
+                onLayoutChanged: (LabelLayout? layout) {
+                  if (layout != null) {
+                    setState(() {
+                      _layout = layout;
+                      _printError = null;
+                    });
+                  }
+                },
                 onPrint: _selectedRecordIds.isEmpty ? null : _print,
               );
               if (constraints.maxWidth >= 840) {
@@ -235,21 +253,25 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
 
 class _PrintConfigurationCard extends StatelessWidget {
   const _PrintConfigurationCard({
+    required this.layout,
     required this.copies,
     required this.selectedRecordCount,
     required this.isPrinting,
     required this.errorMessage,
     required this.onDecreaseCopies,
     required this.onIncreaseCopies,
+    required this.onLayoutChanged,
     required this.onPrint,
   });
 
+  final LabelLayout layout;
   final int copies;
   final int selectedRecordCount;
   final bool isPrinting;
   final String? errorMessage;
   final VoidCallback? onDecreaseCopies;
   final VoidCallback onIncreaseCopies;
+  final ValueChanged<LabelLayout?> onLayoutChanged;
   final VoidCallback? onPrint;
 
   @override
@@ -270,6 +292,11 @@ class _PrintConfigurationCard extends StatelessWidget {
             const SizedBox(height: 4),
             const Text(
               'The system print dialog selects the available printer.',
+            ),
+            const SizedBox(height: 20),
+            LabelLayoutSelector(
+              selectedLayout: layout,
+              onChanged: onLayoutChanged,
             ),
             const SizedBox(height: 20),
             const Text('Copies per record'),
@@ -310,7 +337,7 @@ class _PrintConfigurationCard extends StatelessWidget {
                     _PrintSummaryLine(
                       label: 'Layout',
                       value:
-                          '${productLabelLayout.widthMm.toStringAsFixed(0)} × ${productLabelLayout.heightMm.toStringAsFixed(0)} mm',
+                          '${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm',
                     ),
                     const SizedBox(height: 8),
                     _PrintSummaryLine(

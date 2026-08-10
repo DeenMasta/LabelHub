@@ -139,6 +139,24 @@ class AppDatabase {
     );
   }
 
+  Future<String?> metadataValue(String key) async {
+    final rows = await _executor.runSelect(
+      'SELECT value FROM app_metadata WHERE key = ?',
+      <Object?>[key],
+    );
+    return rows.isEmpty ? null : rows.single['value'] as String;
+  }
+
+  Future<void> saveMetadata({required String key, required String value}) {
+    return _executor.runInsert(
+      '''
+        INSERT INTO app_metadata (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      ''',
+      <Object?>[key, value],
+    );
+  }
+
   Future<Set<String>> barcodeValuesForTemplate(String templateId) async {
     final rows = await _executor.runSelect(
       'SELECT barcode_value FROM records WHERE template_id = ? AND is_archived = 0',
