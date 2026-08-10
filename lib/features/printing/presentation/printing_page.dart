@@ -18,7 +18,9 @@ import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
 import '../data/pdf_label_document_generator.dart';
 import '../data/print_job_repository.dart';
+import '../data/printer_profile_repository.dart';
 import '../domain/entities/print_job.dart';
+import '../domain/entities/printer_profile.dart';
 
 class PrintingPage extends ConsumerStatefulWidget {
   const PrintingPage({
@@ -42,10 +44,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   List<PrinterDevice> _availablePrinters = const <PrinterDevice>[];
   List<CatalogueRecord> _records = const <CatalogueRecord>[];
   List<PrintJob> _printJobs = const <PrintJob>[];
+  List<PrinterProfile> _printerProfiles = const <PrinterProfile>[];
   Object? _loadError;
   String? _printError;
   bool _isLoading = true;
   bool _isDiscoveringBluetooth = false;
+  bool _isDiscoveringUsb = false;
   bool _isPrinting = false;
   int _copies = 1;
   LabelLayout _layout = productLabelLayout;
@@ -77,10 +81,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         RecordRepository(database).list(),
         PrintJobRepository(database).listRecent(),
         _printerCatalog.initialDevices(),
+        PrinterProfileRepository(database).list(),
       ]);
       final records = results[0] as List<CatalogueRecord>;
       final printJobs = results[1] as List<PrintJob>;
       final printers = results[2] as List<PrinterDevice>;
+      final printerProfiles = results[3] as List<PrinterProfile>;
       if (!mounted) {
         return;
       }
@@ -94,6 +100,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         );
         _printJobs = printJobs;
         _availablePrinters = _mergePrinters(printers);
+        _printerProfiles = printerProfiles;
+        _availablePrinters = _mergePrinters(
+          printerProfiles
+              .map((PrinterProfile profile) => profile.toDevice())
+              .toList(),
+        );
         _selectedPrinter ??= _availablePrinters.firstOrNull;
       });
     } on Exception catch (error) {
@@ -147,6 +159,93 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         setState(() => _isDiscoveringBluetooth = false);
       }
     }
+  }
+
+  Future<void> _discoverUsbPrinters() async {
+    if (_isDiscoveringUsb) {
+      return;
+    }
+    setState(() {
+      _isDiscoveringUsb = true;
+      _printError = null;
+    });
+    try {
+      final devices = await _printerCatalog.discoverUsb();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _availablePrinters = _mergePrinters(devices));
+      if (devices.isEmpty && mounted) {
+        setState(() {
+          _printError =
+              'No compatible USB printers were found. Connect the printer, then try again.';
+        });
+      }
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _printError = _errorMessage(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDiscoveringUsb = false);
+      }
+    }
+  }
+
+  Future<void> _saveNetworkProfile({
+    required String name,
+    required String host,
+    required int port,
+    required PrinterProtocol protocol,
+  }) async {
+    final database = await ref.read(appDatabaseProvider.future);
+    final profile = PrinterProfile(
+      id: const Uuid().v4(),
+      name: name.trim(),
+      kind: PrinterKind.network,
+      protocol: protocol,
+      address: host.trim(),
+      port: port,
+    );
+    await PrinterProfileRepository(database).saveNetwork(
+      id: profile.id,
+      name: name,
+      host: host,
+      port: port,
+      protocol: protocol,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _printerProfiles = <PrinterProfile>[
+        ..._printerProfiles,
+        profile,
+      ]..sort((PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name));
+      _availablePrinters = _mergePrinters(<PrinterDevice>[profile.toDevice()]);
+      _selectedPrinter = profile.toDevice();
+      _printError = null;
+    });
+  }
+
+  Future<void> _deleteProfile(PrinterProfile profile) async {
+    final database = await ref.read(appDatabaseProvider.future);
+    await PrinterProfileRepository(database).delete(profile.id);
+    if (!mounted) {
+      return;
+    }
+    final device = profile.toDevice();
+    setState(() {
+      _printerProfiles = _printerProfiles
+          .where((PrinterProfile item) => item.id != profile.id)
+          .toList();
+      _availablePrinters = _availablePrinters
+          .where((PrinterDevice item) => item.id != device.id)
+          .toList();
+      if (_selectedPrinter?.id == device.id) {
+        _selectedPrinter = _availablePrinters.firstOrNull;
+      }
+    });
   }
 
   void _toggleRecord(CatalogueRecord record, bool selected) {
@@ -238,6 +337,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     return switch (error) {
       PdfLabelDocumentException exception => exception.message,
       ThermalPrintingException exception => exception.message,
+      PrinterProfileException exception => exception.message,
       PlatformException exception =>
         exception.message ?? 'The selected printer could not be reached.',
       _PrintException exception => exception.message,
@@ -281,6 +381,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 selectedPrinter: _selectedPrinter,
                 isPrinting: _isPrinting,
                 isDiscoveringBluetooth: _isDiscoveringBluetooth,
+                isDiscoveringUsb: _isDiscoveringUsb,
                 errorMessage: _printError,
                 onDecreaseCopies: _copies > 1
                     ? () => setState(() => _copies--)
@@ -303,6 +404,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                   }
                 },
                 onDiscoverBluetooth: _discoverBluetoothPrinters,
+                onDiscoverUsb: _discoverUsbPrinters,
                 onPrint: _selectedRecordIds.isEmpty || _selectedPrinter == null
                     ? null
                     : _print,
@@ -327,6 +429,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
             },
           ),
           const SizedBox(height: 20),
+          _PrinterProfilesCard(
+            profiles: _printerProfiles,
+            onSaveNetwork: _saveNetworkProfile,
+            onDelete: _deleteProfile,
+          ),
+          const SizedBox(height: 20),
           _RecentPrintJobsCard(printJobs: _printJobs),
         ],
       ],
@@ -343,12 +451,14 @@ class _PrintConfigurationCard extends StatelessWidget {
     required this.selectedPrinter,
     required this.isPrinting,
     required this.isDiscoveringBluetooth,
+    required this.isDiscoveringUsb,
     required this.errorMessage,
     required this.onDecreaseCopies,
     required this.onIncreaseCopies,
     required this.onLayoutChanged,
     required this.onPrinterChanged,
     required this.onDiscoverBluetooth,
+    required this.onDiscoverUsb,
     required this.onPrint,
   });
 
@@ -359,12 +469,14 @@ class _PrintConfigurationCard extends StatelessWidget {
   final PrinterDevice? selectedPrinter;
   final bool isPrinting;
   final bool isDiscoveringBluetooth;
+  final bool isDiscoveringUsb;
   final String? errorMessage;
   final VoidCallback? onDecreaseCopies;
   final VoidCallback onIncreaseCopies;
   final ValueChanged<LabelLayout?> onLayoutChanged;
   final ValueChanged<PrinterDevice?> onPrinterChanged;
   final VoidCallback onDiscoverBluetooth;
+  final VoidCallback onDiscoverUsb;
   final VoidCallback? onPrint;
 
   @override
@@ -430,6 +542,22 @@ class _PrintConfigurationCard extends StatelessWidget {
                 isDiscoveringBluetooth
                     ? 'Checking paired printers…'
                     : 'Find paired Bluetooth printers',
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: isPrinting || isDiscoveringUsb ? null : onDiscoverUsb,
+              icon: isDiscoveringUsb
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.usb_rounded),
+              label: Text(
+                isDiscoveringUsb
+                    ? 'Checking USB printers…'
+                    : 'Find USB printers',
               ),
             ),
             const SizedBox(height: 20),
@@ -522,6 +650,10 @@ class _PrintConfigurationCard extends StatelessWidget {
         'Print directly to the compatible Sunmi terminal’s internal printer.',
       PrinterKind.bluetooth =>
         'Only paired Bluetooth printers are shown. Select the matching receipt or label command mode.',
+      PrinterKind.usb =>
+        'Connect the printer by USB, then select its matching command mode.',
+      PrinterKind.network =>
+        'Sends directly to the saved network printer profile.',
       _ => 'Open Android’s system print dialog for PDF-capable printers.',
     };
   }
@@ -530,6 +662,7 @@ class _PrintConfigurationCard extends StatelessWidget {
     return switch (printer?.protocol) {
       PrinterProtocol.escPos => 'Direct raster via ESC/POS',
       PrinterProtocol.tspl => 'Direct raster via TSPL',
+      PrinterProtocol.zpl => 'Direct raster via ZPL',
       _ => 'PDF via system print dialog',
     };
   }
@@ -564,6 +697,217 @@ class _PrintSummaryLine extends StatelessWidget {
       },
     );
   }
+}
+
+class _PrinterProfilesCard extends StatelessWidget {
+  const _PrinterProfilesCard({
+    required this.profiles,
+    required this.onSaveNetwork,
+    required this.onDelete,
+  });
+
+  final List<PrinterProfile> profiles;
+  final Future<void> Function({
+    required String name,
+    required String host,
+    required int port,
+    required PrinterProtocol protocol,
+  })
+  onSaveNetwork;
+  final Future<void> Function(PrinterProfile profile) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Printer profiles',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showNetworkProfileDialog(context),
+                  icon: const Icon(Icons.add_link_rounded),
+                  label: const Text('Add network printer'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Save a TCP printer address and its command language for offline direct printing.',
+            ),
+            const SizedBox(height: 12),
+            if (profiles.isEmpty)
+              const Text('No network printer profiles have been saved yet.')
+            else
+              for (final profile in profiles) ...<Widget>[
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.print_outlined),
+                  title: Text(profile.name),
+                  subtitle: Text(
+                    '${profile.address}:${profile.port} · ${_protocolLabel(profile.protocol)}',
+                  ),
+                  trailing: IconButton(
+                    tooltip: 'Delete ${profile.name}',
+                    onPressed: () => onDelete(profile),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ),
+                if (profile != profiles.last) const Divider(height: 16),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showNetworkProfileDialog(BuildContext context) async {
+    final nameController = TextEditingController();
+    final hostController = TextEditingController();
+    final portController = TextEditingController(text: '9100');
+    var protocol = PrinterProtocol.zpl;
+    String? errorMessage;
+    var isSaving = false;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return AlertDialog(
+              title: const Text('Add network printer'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    TextField(
+                      controller: nameController,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Profile name',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: hostController,
+                      keyboardType: TextInputType.url,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'IP address or host name',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: portController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'TCP port'),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<PrinterProtocol>(
+                      initialValue: protocol,
+                      decoration: const InputDecoration(
+                        labelText: 'Command language',
+                      ),
+                      items: const <DropdownMenuItem<PrinterProtocol>>[
+                        DropdownMenuItem(
+                          value: PrinterProtocol.zpl,
+                          child: Text('ZPL'),
+                        ),
+                        DropdownMenuItem(
+                          value: PrinterProtocol.tspl,
+                          child: Text('TSPL'),
+                        ),
+                        DropdownMenuItem(
+                          value: PrinterProtocol.escPos,
+                          child: Text('ESC/POS'),
+                        ),
+                      ],
+                      onChanged: isSaving
+                          ? null
+                          : (PrinterProtocol? value) {
+                              if (value != null) {
+                                setDialogState(() => protocol = value);
+                              }
+                            },
+                    ),
+                    if (errorMessage != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Text(
+                        errorMessage!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final port = int.tryParse(portController.text.trim());
+                          if (port == null) {
+                            setDialogState(
+                              () => errorMessage = 'Enter a valid TCP port.',
+                            );
+                            return;
+                          }
+                          setDialogState(() {
+                            isSaving = true;
+                            errorMessage = null;
+                          });
+                          try {
+                            await onSaveNetwork(
+                              name: nameController.text,
+                              host: hostController.text,
+                              port: port,
+                              protocol: protocol,
+                            );
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                            }
+                          } on PrinterProfileException catch (error) {
+                            setDialogState(() => errorMessage = error.message);
+                          } finally {
+                            if (context.mounted) {
+                              setDialogState(() => isSaving = false);
+                            }
+                          }
+                        },
+                  child: Text(isSaving ? 'Saving…' : 'Save profile'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    nameController.dispose();
+    hostController.dispose();
+    portController.dispose();
+  }
+
+  String _protocolLabel(PrinterProtocol protocol) => switch (protocol) {
+    PrinterProtocol.zpl => 'ZPL',
+    PrinterProtocol.tspl => 'TSPL',
+    PrinterProtocol.escPos => 'ESC/POS',
+    PrinterProtocol.systemPdf => 'PDF',
+  };
 }
 
 class _RecentPrintJobsCard extends StatelessWidget {

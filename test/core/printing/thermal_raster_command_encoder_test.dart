@@ -60,4 +60,13 @@ void main() {
     ]);
     expect(commands.sublist(header.length + 4), '\r\nPRINT 1,1\r\n'.codeUnits);
   });
+
+  test('encodes a label bitmap as a ZPL graphic', () {
+    final commands = encoder.zpl(sampleRaster(), widthMm: 58, heightMm: 40);
+
+    expect(
+      String.fromCharCodes(commands),
+      '^XA\n^PW9\n^LL2\n^FO0,0\n^GFA,4,4,2,80000080^FS\n^XZ\n',
+    );
+  });
 }

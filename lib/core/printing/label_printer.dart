@@ -27,7 +27,7 @@ enum PrinterKind { systemPdf, sunmiInner, bluetooth, usb, network }
 ///
 /// ESC/POS is used by receipt printers; TSPL is used by most barcode-label
 /// printers. PDF remains available through the Android system print dialog.
-enum PrinterProtocol { systemPdf, escPos, tspl }
+enum PrinterProtocol { systemPdf, escPos, tspl, zpl }
 
 class PrintRequest {
   const PrintRequest({

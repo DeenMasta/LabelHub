@@ -119,6 +119,12 @@ class BluetoothThermalPrinter implements LabelPrinter {
       kind: PrinterKind.bluetooth,
       protocol: PrinterProtocol.tspl,
     );
+    yield PrinterDevice(
+      id: '$address#zpl',
+      name: '$displayName — barcode labels (ZPL)',
+      kind: PrinterKind.bluetooth,
+      protocol: PrinterProtocol.zpl,
+    );
   }
 
   String _addressFor(String id) => id.split('#').first;

@@ -37,6 +37,11 @@ class ThermalPdfRasterizer {
           widthMm: widthMm,
           heightMm: heightMm,
         ),
+        PrinterProtocol.zpl => _commandEncoder.zpl(
+          raster,
+          widthMm: widthMm,
+          heightMm: heightMm,
+        ),
         PrinterProtocol.systemPdf => throw const ThermalPrintingException(
           'The system print dialog does not accept thermal commands.',
         ),

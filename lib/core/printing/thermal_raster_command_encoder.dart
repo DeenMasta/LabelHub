@@ -49,6 +49,32 @@ class ThermalRasterCommandEncoder {
     return bytes.toBytes();
   }
 
+  /// Encodes a monochrome bitmap with ZPL's ASCII-hex graphic command.
+  ///
+  /// The ASCII form is widely supported and avoids relying on a printer's
+  /// optional compressed-graphic extensions.
+  Uint8List zpl(
+    image.Image raster, {
+    required double widthMm,
+    required double heightMm,
+    int threshold = 160,
+  }) {
+    final bitmap = _bitmap(raster, threshold: threshold);
+    final widthBytes = (raster.width + 7) ~/ 8;
+    final totalBytes = bitmap.length;
+    final header =
+        '^XA\n'
+        '^PW${raster.width}\n'
+        '^LL${raster.height}\n'
+        '^FO0,0\n'
+        '^GFA,$totalBytes,$totalBytes,$widthBytes,';
+    final hex = StringBuffer();
+    for (final byte in bitmap) {
+      hex.write(byte.toRadixString(16).padLeft(2, '0').toUpperCase());
+    }
+    return _ascii('$header$hex^FS\n^XZ\n');
+  }
+
   Uint8List _bitmap(image.Image raster, {required int threshold}) {
     final widthBytes = (raster.width + 7) ~/ 8;
     final bytes = Uint8List(widthBytes * raster.height);

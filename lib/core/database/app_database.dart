@@ -99,6 +99,18 @@ class AppDatabase {
         error_message TEXT
       )
     ''');
+    await _executor.runCustom('''
+      CREATE TABLE IF NOT EXISTS printer_profiles (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        printer_kind TEXT NOT NULL,
+        printer_protocol TEXT NOT NULL,
+        address TEXT NOT NULL,
+        port INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
   }
 
   Future<void> close() => _executor.close();
@@ -312,6 +324,59 @@ class AppDatabase {
     return rows.map(DatabasePrintJob.fromRow).toList();
   }
 
+  Future<void> savePrinterProfile({
+    required String id,
+    required String name,
+    required String printerKind,
+    required String printerProtocol,
+    required String address,
+    int? port,
+  }) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _executor.runInsert(
+      '''
+        INSERT INTO printer_profiles (
+          id, name, printer_kind, printer_protocol, address, port,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          printer_kind = excluded.printer_kind,
+          printer_protocol = excluded.printer_protocol,
+          address = excluded.address,
+          port = excluded.port,
+          updated_at = excluded.updated_at
+      ''',
+      <Object?>[
+        id,
+        name,
+        printerKind,
+        printerProtocol,
+        address,
+        port,
+        now,
+        now,
+      ],
+    );
+  }
+
+  Future<void> deletePrinterProfile(String id) {
+    return _executor.runDelete(
+      'DELETE FROM printer_profiles WHERE id = ?',
+      <Object?>[id],
+    );
+  }
+
+  Future<List<DatabasePrinterProfile>> printerProfiles() async {
+    final rows = await _executor.runSelect('''
+        SELECT id, name, printer_kind, printer_protocol, address, port,
+          created_at, updated_at
+        FROM printer_profiles
+        ORDER BY name COLLATE NOCASE ASC
+      ''', const <Object?>[]);
+    return rows.map(DatabasePrinterProfile.fromRow).toList();
+  }
+
   Future<void> saveImportBatch({
     required String batchId,
     required String templateId,
@@ -478,4 +543,40 @@ class DatabasePrintJob {
   final DateTime createdAt;
   final DateTime? completedAt;
   final String? errorMessage;
+}
+
+/// A user-configured destination retained for offline direct printing.
+class DatabasePrinterProfile {
+  const DatabasePrinterProfile({
+    required this.id,
+    required this.name,
+    required this.printerKind,
+    required this.printerProtocol,
+    required this.address,
+    required this.port,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory DatabasePrinterProfile.fromRow(Map<String, Object?> row) {
+    return DatabasePrinterProfile(
+      id: row['id'] as String,
+      name: row['name'] as String,
+      printerKind: row['printer_kind'] as String,
+      printerProtocol: row['printer_protocol'] as String,
+      address: row['address'] as String,
+      port: row['port'] as int?,
+      createdAt: DateTime.parse(row['created_at'] as String),
+      updatedAt: DateTime.parse(row['updated_at'] as String),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String printerKind;
+  final String printerProtocol;
+  final String address;
+  final int? port;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 }
