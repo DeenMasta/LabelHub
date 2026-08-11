@@ -37,8 +37,7 @@ class ThermalRasterCommandEncoder {
     final bitmap = _bitmap(raster, threshold: threshold);
     final widthBytes = (raster.width + 7) ~/ 8;
     final header =
-        'SIZE ${_millimetres(widthMm)},${_millimetres(heightMm)}\r\n'
-        'GAP 2 mm,0 mm\r\n'
+        'SIZE ${_millimetres(widthMm)} mm,${_millimetres(heightMm)} mm\r\n'
         'DIRECTION 1\r\n'
         'CLS\r\n'
         'BITMAP 0,0,$widthBytes,${raster.height},0,';
@@ -48,6 +47,17 @@ class ThermalRasterCommandEncoder {
       ..add(_ascii('\r\nPRINT 1,1\r\n'));
     return bytes.toBytes();
   }
+
+  /// Configures the physical label bounds and asks the printer to measure the
+  /// gap on the installed media. This moves the media and is intentionally
+  /// separate from normal printing.
+  Uint8List tsplMediaCalibration({
+    required double widthMm,
+    required double heightMm,
+  }) => _ascii(
+    'SIZE ${_millimetres(widthMm)} mm,${_millimetres(heightMm)} mm\r\n'
+    'GAPDETECT\r\n',
+  );
 
   /// Encodes a monochrome bitmap with ZPL's ASCII-hex graphic command.
   ///

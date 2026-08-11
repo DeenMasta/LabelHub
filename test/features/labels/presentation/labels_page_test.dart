@@ -5,13 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/app/theme/app_theme.dart';
 import 'package:labelhub/core/database/app_database.dart';
 import 'package:labelhub/core/database/database_provider.dart';
-import 'package:labelhub/features/printing/presentation/printing_page.dart';
+import 'package:labelhub/features/labels/presentation/labels_page.dart';
 
 void main() {
-  late AppDatabase database;
-
-  setUp(() async {
-    database = await AppDatabase.openForTesting(NativeDatabase.memory());
+  testWidgets('shows a clear label preview before printing', (
+    WidgetTester tester,
+  ) async {
+    final database = await AppDatabase.openForTesting(NativeDatabase.memory());
+    addTearDown(database.close);
     await database.upsertTemplate(
       id: 'system-product-v1',
       name: 'Product label',
@@ -40,15 +41,9 @@ void main() {
         ),
       ],
     );
-  });
-
-  tearDown(() => database.close());
-
-  testWidgets('fits print controls into a compact phone layout', (
-    WidgetTester tester,
-  ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -56,15 +51,20 @@ void main() {
         ],
         child: MaterialApp(
           theme: AppTheme.light,
-          home: const PrintingPage(initialRecordIds: <String>['record-1']),
+          home: const Scaffold(body: LabelsPage()),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Print labels'), findsAtLeastNWidgets(1));
-    expect(find.text('This print job'), findsOneWidget);
-    expect(find.text('Labels to print'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Continue to print 1 label'),
+      200,
+    );
+    expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Continue to print 1 label'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Label content'), 200);
+    expect(find.text('Label content'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

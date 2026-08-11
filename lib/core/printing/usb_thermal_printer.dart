@@ -1,10 +1,12 @@
 import 'package:flutter/services.dart';
 
 import 'label_printer.dart';
+import 'thermal_raster_command_encoder.dart';
 import 'thermal_pdf_rasterizer.dart';
+import 'tspl_label_command_encoder.dart';
 
 /// Prints to Android USB host-mode printers exposed by the platform channel.
-class UsbThermalPrinter implements LabelPrinter {
+class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
   UsbThermalPrinter({
     MethodChannel channel = const MethodChannel('labelhub/usb_printer'),
     ThermalPdfRasterizer rasterizer = const ThermalPdfRasterizer(),
@@ -53,13 +55,47 @@ class UsbThermalPrinter implements LabelPrinter {
       );
     }
     try {
-      final commands = await _rasterizer.commandsFor(
-        request,
-        protocol: device.protocol,
-        widthMm: request.labelWidthMm,
-        heightMm: request.labelHeightMm,
-      );
+      final commands = device.protocol == PrinterProtocol.tspl
+          ? const TsplLabelCommandEncoder().encode(request)
+          : await _rasterizer.commandsFor(
+              request,
+              protocol: device.protocol,
+              widthMm: request.labelWidthMm,
+              heightMm: request.labelHeightMm,
+            );
       await _channel.invokeMethod<void>('write', commands);
+      return const PrintResult(succeeded: true);
+    } on Exception catch (error) {
+      return PrintResult(succeeded: false, message: error.toString());
+    }
+  }
+
+  @override
+  Future<PrintResult> calibrateTsplMedia({
+    required double widthMm,
+    required double heightMm,
+  }) async {
+    final device = _connectedDevice;
+    if (device == null) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Connect a USB printer before calibrating media.',
+      );
+    }
+    if (device.protocol != PrinterProtocol.tspl) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Media calibration is available only for TSPL label printers.',
+      );
+    }
+    try {
+      await _channel.invokeMethod<void>(
+        'write',
+        const ThermalRasterCommandEncoder().tsplMediaCalibration(
+          widthMm: widthMm,
+          heightMm: heightMm,
+        ),
+      );
       return const PrintResult(succeeded: true);
     } on Exception catch (error) {
       return PrintResult(succeeded: false, message: error.toString());

@@ -20,16 +20,14 @@ class PrinterProfile {
   final int? port;
 
   PrinterDevice toDevice() {
-    if (kind != PrinterKind.network || port == null) {
-      throw StateError(
-        'Only network printer profiles can be printed directly.',
-      );
-    }
-    return PrinterDevice(
-      id: NetworkPrinterEndpoint.deviceId(host: address, port: port!),
-      name: name,
-      kind: kind,
-      protocol: protocol,
-    );
+    final id = switch (kind) {
+      PrinterKind.network when port != null => NetworkPrinterEndpoint.deviceId(
+        host: address,
+        port: port!,
+      ),
+      PrinterKind.bluetooth => '$address#${protocol.name}',
+      _ => throw StateError('The printer profile is incomplete.'),
+    };
+    return PrinterDevice(id: id, name: name, kind: kind, protocol: protocol);
   }
 }

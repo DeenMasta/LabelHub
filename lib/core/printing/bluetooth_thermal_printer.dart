@@ -3,14 +3,17 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'label_printer.dart';
+import 'thermal_raster_command_encoder.dart';
 import 'thermal_pdf_rasterizer.dart';
+import 'tspl_label_command_encoder.dart';
 
 /// Prints to an already paired Bluetooth SPP printer.
 ///
 /// Receipt printers use ESC/POS while barcode-label printers use TSPL. Pairing
 /// is intentionally handled by Android system settings; LabelHub only lists
 /// bonded devices and never changes device Bluetooth settings.
-class BluetoothThermalPrinter implements LabelPrinter {
+class BluetoothThermalPrinter
+    implements LabelPrinter, TsplMediaCalibratingPrinter {
   BluetoothThermalPrinter({
     MethodChannel channel = const MethodChannel('labelhub/bluetooth_printer'),
     ThermalPdfRasterizer rasterizer = const ThermalPdfRasterizer(),
@@ -65,13 +68,46 @@ class BluetoothThermalPrinter implements LabelPrinter {
       );
     }
     try {
-      final commands = await _rasterizer.commandsFor(
-        request,
-        protocol: device.protocol,
-        widthMm: request.labelWidthMm,
-        heightMm: request.labelHeightMm,
-      );
+      final commands = device.protocol == PrinterProtocol.tspl
+          ? const TsplLabelCommandEncoder().encode(request)
+          : await _rasterizer.commandsFor(
+              request,
+              protocol: device.protocol,
+              widthMm: request.labelWidthMm,
+              heightMm: request.labelHeightMm,
+            );
       await _writeInChunks(commands);
+      return const PrintResult(succeeded: true);
+    } on Exception catch (error) {
+      return PrintResult(succeeded: false, message: error.toString());
+    }
+  }
+
+  @override
+  Future<PrintResult> calibrateTsplMedia({
+    required double widthMm,
+    required double heightMm,
+  }) async {
+    final device = _connectedDevice;
+    if (device == null) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Connect a Bluetooth printer before calibrating media.',
+      );
+    }
+    if (device.protocol != PrinterProtocol.tspl) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Media calibration is available only for TSPL label printers.',
+      );
+    }
+    try {
+      await _writeInChunks(
+        const ThermalRasterCommandEncoder().tsplMediaCalibration(
+          widthMm: widthMm,
+          heightMm: heightMm,
+        ),
+      );
       return const PrintResult(succeeded: true);
     } on Exception catch (error) {
       return PrintResult(succeeded: false, message: error.toString());
@@ -84,10 +120,13 @@ class BluetoothThermalPrinter implements LabelPrinter {
         'Bluetooth thermal printing is currently available on Android only.',
       );
     }
-    final status = await Permission.bluetoothConnect.request();
-    if (!status.isGranted) {
+    final statuses = await <Permission>[
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+    ].request();
+    if (statuses.values.any((PermissionStatus status) => !status.isGranted)) {
       throw const ThermalPrintingException(
-        'Bluetooth permission is required to use paired printers.',
+        'Allow Nearby devices permission to use paired Bluetooth printers.',
       );
     }
   }
@@ -107,25 +146,37 @@ class BluetoothThermalPrinter implements LabelPrinter {
     }
     final name = (device['name'] as String?)?.trim();
     final displayName = name == null || name.isEmpty ? address : name;
-    yield PrinterDevice(
-      id: '$address#escpos',
-      name: '$displayName — receipt (ESC/POS)',
-      kind: PrinterKind.bluetooth,
-      protocol: PrinterProtocol.escPos,
-    );
+    final isZywellLabelPrinter = _isZywellLabelPrinter(displayName);
+    if (!isZywellLabelPrinter) {
+      yield PrinterDevice(
+        id: '$address#escpos',
+        name: '$displayName — receipt (ESC/POS)',
+        kind: PrinterKind.bluetooth,
+        protocol: PrinterProtocol.escPos,
+      );
+    }
     yield PrinterDevice(
       id: '$address#tspl',
       name: '$displayName — barcode labels (TSPL)',
       kind: PrinterKind.bluetooth,
       protocol: PrinterProtocol.tspl,
     );
-    yield PrinterDevice(
-      id: '$address#zpl',
-      name: '$displayName — barcode labels (ZPL)',
-      kind: PrinterKind.bluetooth,
-      protocol: PrinterProtocol.zpl,
-    );
+    if (!isZywellLabelPrinter) {
+      yield PrinterDevice(
+        id: '$address#zpl',
+        name: '$displayName — barcode labels (ZPL)',
+        kind: PrinterKind.bluetooth,
+        protocol: PrinterProtocol.zpl,
+      );
+    }
   }
 
   String _addressFor(String id) => id.split('#').first;
+
+  bool _isZywellLabelPrinter(String name) {
+    final normalizedName = name.toLowerCase();
+    return normalizedName.contains('zywell') ||
+        normalizedName.contains('z909') ||
+        normalizedName.contains('zy909');
+  }
 }

@@ -14,6 +14,8 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodCall
@@ -99,21 +101,21 @@ class MainActivity : FlutterActivity() {
                 result.success(devices)
             }
             "connect" -> {
+                if (!hasBluetoothScanPermission()) {
+                    result.error(
+                        "bluetooth_permission_denied",
+                        "Nearby devices permission has not been granted.",
+                        null,
+                    )
+                    return
+                }
                 val address = call.argument<String>("address")
                 if (address.isNullOrBlank()) {
                     result.error("invalid_address", "A Bluetooth address is required.", null)
                     return
                 }
                 runInWorker(result) {
-                    disconnectBluetoothPrinter()
-                    val adapter = BluetoothAdapter.getDefaultAdapter()
-                        ?: throw IllegalStateException("Bluetooth is unavailable on this device.")
-                    adapter.cancelDiscovery()
-                    val socket = adapter.getRemoteDevice(address)
-                        .createRfcommSocketToServiceRecord(serialPortProfileUuid)
-                    socket.connect()
-                    bluetoothSocket = socket
-                    bluetoothOutput = socket.outputStream
+                    connectBluetoothPrinter(address)
                     null
                 }
             }
@@ -208,6 +210,11 @@ class MainActivity : FlutterActivity() {
             checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
 
+    private fun hasBluetoothScanPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+
     private fun runInWorker(result: MethodChannel.Result, operation: () -> Any?) {
         Thread {
             try {
@@ -219,6 +226,31 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun connectBluetoothPrinter(address: String) {
+        disconnectBluetoothPrinter()
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+            ?: throw IllegalStateException("Bluetooth is unavailable on this device.")
+        adapter.cancelDiscovery()
+        val socket = adapter.getRemoteDevice(address)
+            .createRfcommSocketToServiceRecord(serialPortProfileUuid)
+        val timeoutHandler = Handler(Looper.getMainLooper())
+        val timeout = Runnable {
+            try {
+                socket.close()
+            } catch (_: Exception) {
+                // Closing the blocked connection unblocks BluetoothSocket.connect().
+            }
+        }
+        timeoutHandler.postDelayed(timeout, 12_000)
+        try {
+            socket.connect()
+            bluetoothSocket = socket
+            bluetoothOutput = socket.outputStream
+        } finally {
+            timeoutHandler.removeCallbacks(timeout)
+        }
     }
 
     private fun disconnectBluetoothPrinter() {

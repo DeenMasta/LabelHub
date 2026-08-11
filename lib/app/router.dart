@@ -7,8 +7,10 @@ import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/imports/presentation/imports_page.dart';
 import '../features/labels/presentation/labels_page.dart';
 import '../features/printing/presentation/printing_page.dart';
+import '../features/printing/presentation/printer_settings_page.dart';
 import '../features/records/presentation/records_page.dart';
 import '../features/records/presentation/record_details_page.dart';
+import '../features/settings/presentation/settings_page.dart';
 import '../features/templates/presentation/templates_page.dart';
 
 final GoRouter appRouter = GoRouter(
@@ -41,6 +43,15 @@ final GoRouter appRouter = GoRouter(
               initialLayoutId: state.uri.queryParameters['layout'],
             );
           },
+        ),
+        GoRoute(path: '/settings', builder: (_, _) => const SettingsPage()),
+        GoRoute(
+          path: '/settings/printers',
+          builder: (_, _) => const PrinterSettingsPage(),
+        ),
+        GoRoute(
+          path: '/printer-settings',
+          redirect: (_, _) => '/settings/printers',
         ),
       ],
     ),
@@ -87,7 +98,7 @@ class _AppShell extends StatelessWidget {
     return Scaffold(
       body: Column(
         children: <Widget>[
-          const AppHeader(),
+          AppHeader(onSettingsPressed: () => context.go('/settings')),
           Expanded(child: child),
         ],
       ),

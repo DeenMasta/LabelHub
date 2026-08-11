@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 /// Shared product header used by every primary application screen.
 class AppHeader extends StatelessWidget {
-  const AppHeader({super.key});
+  const AppHeader({this.onSettingsPressed, super.key});
+
+  final VoidCallback? onSettingsPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -22,9 +24,9 @@ class AppHeader extends StatelessWidget {
             ),
             const Spacer(),
             _HeaderAction(
-              icon: Icons.notifications_none_rounded,
-              tooltip: 'Notifications',
-              onPressed: () {},
+              icon: Icons.settings_outlined,
+              tooltip: 'Settings',
+              onPressed: onSettingsPressed,
             ),
             const SizedBox(width: 8),
             CircleAvatar(
@@ -74,7 +76,7 @@ class _HeaderAction extends StatelessWidget {
 
   final IconData icon;
   final String tooltip;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

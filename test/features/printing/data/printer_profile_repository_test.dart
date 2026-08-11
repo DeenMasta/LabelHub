@@ -47,4 +47,18 @@ void main() {
       throwsA(isA<PrinterProfileException>()),
     );
   });
+
+  test('stores a paired Bluetooth barcode printer profile', () async {
+    await repository.saveBluetooth(
+      id: 'stockroom-bluetooth',
+      name: 'Stockroom label printer',
+      address: 'AA:BB:CC:DD:EE:FF',
+      protocol: PrinterProtocol.tspl,
+    );
+
+    final profile = (await repository.list()).single;
+
+    expect(profile.kind, PrinterKind.bluetooth);
+    expect(profile.toDevice().id, 'AA:BB:CC:DD:EE:FF#tspl');
+  });
 }

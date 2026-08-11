@@ -280,16 +280,10 @@ class _LabelPreviewPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final canContinue = record != null && barcodePreview?.isValid == true;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _FieldBindingCard(
-          primaryFieldKey: primaryFieldKey,
-          secondaryFieldKey: secondaryFieldKey,
-          onPrimaryFieldChanged: onPrimaryFieldChanged,
-          onSecondaryFieldChanged: onSecondaryFieldChanged,
-        ),
-        const SizedBox(height: 16),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -313,12 +307,6 @@ class _LabelPreviewPanel extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: onPreparePrint,
-                  icon: const Icon(Icons.print_outlined),
-                  label: const Text('Prepare print'),
-                ),
                 const SizedBox(height: 16),
                 if (record == null)
                   const _SelectRecordPrompt()
@@ -341,9 +329,26 @@ class _LabelPreviewPanel extends StatelessWidget {
                       ),
                     ),
                   ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: canContinue ? onPreparePrint : null,
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: Text(
+                    selectedCount == 1
+                        ? 'Continue to print 1 label'
+                        : 'Continue to print $selectedCount labels',
+                  ),
+                ),
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 16),
+        _FieldBindingCard(
+          primaryFieldKey: primaryFieldKey,
+          secondaryFieldKey: secondaryFieldKey,
+          onPrimaryFieldChanged: onPrimaryFieldChanged,
+          onSecondaryFieldChanged: onSecondaryFieldChanged,
         ),
       ],
     );
@@ -366,37 +371,30 @@ class _FieldBindingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Field bindings',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            const Text('Choose the imported values shown above the barcode.'),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: primaryFieldKey,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Primary field'),
-              items: _fieldItems(),
-              onChanged: onPrimaryFieldChanged,
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: secondaryFieldKey,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Secondary field'),
-              items: _fieldItems(),
-              onChanged: onSecondaryFieldChanged,
-            ),
-          ],
+      child: ExpansionTile(
+        title: const Text(
+          'Label content',
+          style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        subtitle: const Text('Choose the fields shown above the barcode.'),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: <Widget>[
+          DropdownButtonFormField<String>(
+            initialValue: primaryFieldKey,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Primary field'),
+            items: _fieldItems(),
+            onChanged: onPrimaryFieldChanged,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: secondaryFieldKey,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Secondary field'),
+            items: _fieldItems(),
+            onChanged: onSecondaryFieldChanged,
+          ),
+        ],
       ),
     );
   }

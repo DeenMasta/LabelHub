@@ -45,8 +45,7 @@ void main() {
   test('encodes a label bitmap with TSPL dimensions and print command', () {
     final commands = encoder.tspl(sampleRaster(), widthMm: 58, heightMm: 40);
     const header =
-        'SIZE 58,40\r\n'
-        'GAP 2 mm,0 mm\r\n'
+        'SIZE 58 mm,40 mm\r\n'
         'DIRECTION 1\r\n'
         'CLS\r\n'
         'BITMAP 0,0,2,2,0,';
@@ -59,6 +58,12 @@ void main() {
       0x80,
     ]);
     expect(commands.sublist(header.length + 4), '\r\nPRINT 1,1\r\n'.codeUnits);
+  });
+
+  test('configures TSPL label bounds before auto-detecting the media gap', () {
+    final commands = encoder.tsplMediaCalibration(widthMm: 40, heightMm: 30);
+
+    expect(commands, 'SIZE 40 mm,30 mm\r\nGAPDETECT\r\n'.codeUnits);
   });
 
   test('encodes a label bitmap as a ZPL graphic', () {

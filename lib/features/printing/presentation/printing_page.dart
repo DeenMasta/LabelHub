@@ -12,7 +12,6 @@ import '../../../core/printing/thermal_pdf_rasterizer.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
-import '../../labels/presentation/widgets/label_layout_selector.dart';
 import '../../labels/presentation/widgets/record_selector_card.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
@@ -44,12 +43,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   List<PrinterDevice> _availablePrinters = const <PrinterDevice>[];
   List<CatalogueRecord> _records = const <CatalogueRecord>[];
   List<PrintJob> _printJobs = const <PrintJob>[];
-  List<PrinterProfile> _printerProfiles = const <PrinterProfile>[];
   Object? _loadError;
   String? _printError;
   bool _isLoading = true;
   bool _isDiscoveringBluetooth = false;
   bool _isDiscoveringUsb = false;
+  bool _isCalibratingMedia = false;
   bool _isPrinting = false;
   int _copies = 1;
   LabelLayout _layout = productLabelLayout;
@@ -100,7 +99,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         );
         _printJobs = printJobs;
         _availablePrinters = _mergePrinters(printers);
-        _printerProfiles = printerProfiles;
         _availablePrinters = _mergePrinters(
           printerProfiles
               .map((PrinterProfile profile) => profile.toDevice())
@@ -192,62 +190,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     }
   }
 
-  Future<void> _saveNetworkProfile({
-    required String name,
-    required String host,
-    required int port,
-    required PrinterProtocol protocol,
-  }) async {
-    final database = await ref.read(appDatabaseProvider.future);
-    final profile = PrinterProfile(
-      id: const Uuid().v4(),
-      name: name.trim(),
-      kind: PrinterKind.network,
-      protocol: protocol,
-      address: host.trim(),
-      port: port,
-    );
-    await PrinterProfileRepository(database).saveNetwork(
-      id: profile.id,
-      name: name,
-      host: host,
-      port: port,
-      protocol: protocol,
-    );
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _printerProfiles = <PrinterProfile>[
-        ..._printerProfiles,
-        profile,
-      ]..sort((PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name));
-      _availablePrinters = _mergePrinters(<PrinterDevice>[profile.toDevice()]);
-      _selectedPrinter = profile.toDevice();
-      _printError = null;
-    });
-  }
-
-  Future<void> _deleteProfile(PrinterProfile profile) async {
-    final database = await ref.read(appDatabaseProvider.future);
-    await PrinterProfileRepository(database).delete(profile.id);
-    if (!mounted) {
-      return;
-    }
-    final device = profile.toDevice();
-    setState(() {
-      _printerProfiles = _printerProfiles
-          .where((PrinterProfile item) => item.id != profile.id)
-          .toList();
-      _availablePrinters = _availablePrinters
-          .where((PrinterDevice item) => item.id != device.id)
-          .toList();
-      if (_selectedPrinter?.id == device.id) {
-        _selectedPrinter = _availablePrinters.firstOrNull;
-      }
-    });
-  }
-
   void _toggleRecord(CatalogueRecord record, bool selected) {
     setState(() {
       if (selected) {
@@ -262,7 +204,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   Future<void> _print() async {
     final records = _selectedRecords;
     final selectedPrinter = _selectedPrinter;
-    if (records.isEmpty || _isPrinting || selectedPrinter == null) {
+    if (records.isEmpty ||
+        _isPrinting ||
+        _isCalibratingMedia ||
+        selectedPrinter == null) {
       return;
     }
     setState(() {
@@ -295,6 +240,15 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         PrintRequest(
           recordIds: records
               .map((CatalogueRecord record) => record.id)
+              .toList(),
+          labels: records
+              .map(
+                (CatalogueRecord record) => PrintLabelData(
+                  primaryText: record.values['item_name']?.trim() ?? '-',
+                  secondaryText: record.values['price']?.trim() ?? '-',
+                  barcodeValue: record.barcodeValue,
+                ),
+              )
               .toList(),
           copies: _copies,
           pdfBytes: pdfBytes,
@@ -333,7 +287,72 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     }
   }
 
+  Future<void> _calibrateTsplMedia() async {
+    final selectedPrinter = _selectedPrinter;
+    if (_isPrinting ||
+        _isCalibratingMedia ||
+        selectedPrinter?.protocol != PrinterProtocol.tspl) {
+      return;
+    }
+    setState(() {
+      _isCalibratingMedia = true;
+      _printError = null;
+    });
+
+    LabelPrinter? connectedPrinter;
+    try {
+      connectedPrinter = _printerCatalog.printerFor(selectedPrinter!);
+      final calibratingPrinter = connectedPrinter;
+      if (calibratingPrinter is! TsplMediaCalibratingPrinter) {
+        throw const ThermalPrintingException(
+          'The selected printer does not support TSPL media calibration.',
+        );
+      }
+      await connectedPrinter.connect(selectedPrinter);
+      final result = await (calibratingPrinter as TsplMediaCalibratingPrinter)
+          .calibrateTsplMedia(
+            widthMm: _layout.widthMm,
+            heightMm: _layout.heightMm,
+          );
+      if (!result.succeeded) {
+        throw ThermalPrintingException(
+          result.message ?? 'The printer could not calibrate the label media.',
+        );
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Media calibrated for ${_layout.widthMm.toStringAsFixed(0)} × ${_layout.heightMm.toStringAsFixed(0)} mm labels.',
+            ),
+          ),
+        );
+      }
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _printError = _errorMessage(error));
+      }
+    } finally {
+      if (connectedPrinter != null) {
+        try {
+          await connectedPrinter.disconnect();
+        } on Exception {
+          // A completed calibration remains valid if the transport closes late.
+        }
+      }
+      if (mounted) {
+        setState(() => _isCalibratingMedia = false);
+      }
+    }
+  }
+
   String _errorMessage(Object error) {
+    final technicalMessage = error.toString().toLowerCase();
+    if (technicalMessage.contains('bluetooth_scan') ||
+        technicalMessage.contains('bluetooth_connect') ||
+        technicalMessage.contains('nearby devices permission')) {
+      return 'Allow Nearby devices permission to use paired Bluetooth printers, then try again.';
+    }
     return switch (error) {
       PdfLabelDocumentException exception => exception.message,
       ThermalPrintingException exception => exception.message,
@@ -352,8 +371,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         PageHeading(
           eyebrow: 'Output',
           title: 'Print labels',
-          description:
-              'Generate a physically sized ${_layout.widthMm.toStringAsFixed(0)} × ${_layout.heightMm.toStringAsFixed(0)} mm PDF and hand it to the device print system.',
+          description: 'Review the labels, choose where they go, then print.',
         ),
         const SizedBox(height: 20),
         if (_isLoading)
@@ -366,9 +384,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
               final selector = RecordSelectorCard(
-                title: 'Records to print',
-                description:
-                    'Choose the active records to include in this job.',
+                title: widget.initialRecordIds.isEmpty
+                    ? 'Choose labels to print'
+                    : 'Labels selected from preview',
+                description: widget.initialRecordIds.isEmpty
+                    ? 'Select the active records to include in this job.'
+                    : 'Your preview selection is ready. Change it only if needed.',
                 records: _records,
                 selectedRecordIds: _selectedRecordIds,
                 onChanged: _toggleRecord,
@@ -380,6 +401,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 printers: _availablePrinters,
                 selectedPrinter: _selectedPrinter,
                 isPrinting: _isPrinting,
+                isCalibratingMedia: _isCalibratingMedia,
                 isDiscoveringBluetooth: _isDiscoveringBluetooth,
                 isDiscoveringUsb: _isDiscoveringUsb,
                 errorMessage: _printError,
@@ -387,14 +409,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                     ? () => setState(() => _copies--)
                     : null,
                 onIncreaseCopies: () => setState(() => _copies++),
-                onLayoutChanged: (LabelLayout? layout) {
-                  if (layout != null) {
-                    setState(() {
-                      _layout = layout;
-                      _printError = null;
-                    });
-                  }
-                },
                 onPrinterChanged: (PrinterDevice? printer) {
                   if (printer != null) {
                     setState(() {
@@ -405,6 +419,8 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 },
                 onDiscoverBluetooth: _discoverBluetoothPrinters,
                 onDiscoverUsb: _discoverUsbPrinters,
+                onManageProfiles: () => context.go('/settings/printers'),
+                onCalibrateTsplMedia: _calibrateTsplMedia,
                 onPrint: _selectedRecordIds.isEmpty || _selectedPrinter == null
                     ? null
                     : _print,
@@ -429,12 +445,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
             },
           ),
           const SizedBox(height: 20),
-          _PrinterProfilesCard(
-            profiles: _printerProfiles,
-            onSaveNetwork: _saveNetworkProfile,
-            onDelete: _deleteProfile,
-          ),
-          const SizedBox(height: 20),
           _RecentPrintJobsCard(printJobs: _printJobs),
         ],
       ],
@@ -450,15 +460,17 @@ class _PrintConfigurationCard extends StatelessWidget {
     required this.printers,
     required this.selectedPrinter,
     required this.isPrinting,
+    required this.isCalibratingMedia,
     required this.isDiscoveringBluetooth,
     required this.isDiscoveringUsb,
     required this.errorMessage,
     required this.onDecreaseCopies,
     required this.onIncreaseCopies,
-    required this.onLayoutChanged,
     required this.onPrinterChanged,
     required this.onDiscoverBluetooth,
     required this.onDiscoverUsb,
+    required this.onManageProfiles,
+    required this.onCalibrateTsplMedia,
     required this.onPrint,
   });
 
@@ -468,15 +480,17 @@ class _PrintConfigurationCard extends StatelessWidget {
   final List<PrinterDevice> printers;
   final PrinterDevice? selectedPrinter;
   final bool isPrinting;
+  final bool isCalibratingMedia;
   final bool isDiscoveringBluetooth;
   final bool isDiscoveringUsb;
   final String? errorMessage;
   final VoidCallback? onDecreaseCopies;
   final VoidCallback onIncreaseCopies;
-  final ValueChanged<LabelLayout?> onLayoutChanged;
   final ValueChanged<PrinterDevice?> onPrinterChanged;
   final VoidCallback onDiscoverBluetooth;
   final VoidCallback onDiscoverUsb;
+  final VoidCallback onManageProfiles;
+  final VoidCallback onCalibrateTsplMedia;
   final VoidCallback? onPrint;
 
   @override
@@ -489,21 +503,22 @@ class _PrintConfigurationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Print configuration',
+              'Ready to print',
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),
             const Text(
-              'The system print dialog selects the available printer.',
+              'Choose a saved printer. You can add another one from Settings.',
             ),
             const SizedBox(height: 20),
-            LabelLayoutSelector(
-              selectedLayout: layout,
-              onChanged: onLayoutChanged,
+            _PrintJobSummary(
+              layout: layout,
+              selectedRecordCount: selectedRecordCount,
+              labelCount: labelCount,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             DropdownButtonFormField<PrinterDevice>(
               key: ValueKey<String?>(selectedPrinter?.id),
               initialValue: selectedPrinter,
@@ -519,49 +534,100 @@ class _PrintConfigurationCard extends StatelessWidget {
                     child: Text(printer.name, overflow: TextOverflow.ellipsis),
                   ),
               ],
-              onChanged: isPrinting ? null : onPrinterChanged,
+              onChanged: isPrinting || isCalibratingMedia
+                  ? null
+                  : onPrinterChanged,
             ),
             const SizedBox(height: 8),
             Text(
               _printerHint(selectedPrinter),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: isPrinting || isDiscoveringBluetooth
-                  ? null
-                  : onDiscoverBluetooth,
-              icon: isDiscoveringBluetooth
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.bluetooth_searching_rounded),
-              label: Text(
-                isDiscoveringBluetooth
-                    ? 'Checking paired printers…'
-                    : 'Find paired Bluetooth printers',
+            if (selectedPrinter?.protocol == PrinterProtocol.tspl) ...<Widget>[
+              const SizedBox(height: 12),
+              const Text(
+                'After loading or changing labels, calibrate once so the printer detects the label gap.',
               ),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: isPrinting || isDiscoveringUsb ? null : onDiscoverUsb,
-              icon: isDiscoveringUsb
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.usb_rounded),
-              label: Text(
-                isDiscoveringUsb
-                    ? 'Checking USB printers…'
-                    : 'Find USB printers',
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: isPrinting || isCalibratingMedia
+                    ? null
+                    : onCalibrateTsplMedia,
+                icon: isCalibratingMedia
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.straighten_rounded),
+                label: Text(
+                  isCalibratingMedia
+                      ? 'Detecting label media…'
+                      : 'Calibrate ${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm labels',
+                ),
               ),
-            ),
+            ],
+            const SizedBox(height: 4),
+            if (selectedPrinter?.kind == PrinterKind.network)
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Add or find a printer'),
+                subtitle: const Text(
+                  'Set up a profile or use a connected printer once.',
+                ),
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    onPressed:
+                        isPrinting ||
+                            isCalibratingMedia ||
+                            isDiscoveringBluetooth
+                        ? null
+                        : onDiscoverBluetooth,
+                    icon: isDiscoveringBluetooth
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.bluetooth_searching_rounded),
+                    label: Text(
+                      isDiscoveringBluetooth
+                          ? 'Checking paired printers…'
+                          : 'Find paired Bluetooth printers',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed:
+                        isPrinting || isCalibratingMedia || isDiscoveringUsb
+                        ? null
+                        : onDiscoverUsb,
+                    icon: isDiscoveringUsb
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.usb_rounded),
+                    label: Text(
+                      isDiscoveringUsb
+                          ? 'Checking USB printers…'
+                          : 'Find USB printers',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: isPrinting || isCalibratingMedia
+                        ? null
+                        : onManageProfiles,
+                    icon: const Icon(Icons.settings_outlined),
+                    label: const Text('Set up printer profiles'),
+                  ),
+                ],
+              ),
             const SizedBox(height: 20),
-            const Text('Copies per record'),
+            const Text('Copies for each product'),
             const SizedBox(height: 8),
             Row(
               children: <Widget>[
@@ -586,39 +652,45 @@ class _PrintConfigurationCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            DecoratedBox(
-              decoration: const BoxDecoration(
-                color: AppTheme.paleBlueSurface,
-                borderRadius: BorderRadius.all(Radius.circular(16)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    _PrintSummaryLine(
-                      label: 'Layout',
-                      value:
-                          '${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm',
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Technical output details'),
+              children: <Widget>[
+                DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: AppTheme.paleBlueSurface,
+                    borderRadius: BorderRadius.all(Radius.circular(16)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        _PrintSummaryLine(
+                          label: 'Layout',
+                          value:
+                              '${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm',
+                        ),
+                        const SizedBox(height: 8),
+                        _PrintSummaryLine(
+                          label: 'Selected records',
+                          value: '$selectedRecordCount',
+                        ),
+                        const SizedBox(height: 8),
+                        _PrintSummaryLine(
+                          label: 'Total labels',
+                          value: '$labelCount',
+                        ),
+                        const SizedBox(height: 8),
+                        _PrintSummaryLine(
+                          label: 'Output',
+                          value: _printerOutput(selectedPrinter),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    _PrintSummaryLine(
-                      label: 'Selected records',
-                      value: '$selectedRecordCount',
-                    ),
-                    const SizedBox(height: 8),
-                    _PrintSummaryLine(
-                      label: 'Total labels',
-                      value: '$labelCount',
-                    ),
-                    const SizedBox(height: 8),
-                    _PrintSummaryLine(
-                      label: 'Output',
-                      value: _printerOutput(selectedPrinter),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
             if (errorMessage != null) ...<Widget>[
               const SizedBox(height: 16),
@@ -626,7 +698,7 @@ class _PrintConfigurationCard extends StatelessWidget {
             ],
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: isPrinting ? null : onPrint,
+              onPressed: isPrinting || isCalibratingMedia ? null : onPrint,
               icon: isPrinting
                   ? const SizedBox(
                       width: 20,
@@ -635,7 +707,9 @@ class _PrintConfigurationCard extends StatelessWidget {
                     )
                   : const Icon(Icons.print_outlined),
               label: Text(
-                isPrinting ? 'Opening print dialog…' : 'Print labels',
+                isPrinting
+                    ? 'Preparing print…'
+                    : 'Print $labelCount ${labelCount == 1 ? 'label' : 'labels'}',
               ),
             ),
           ],
@@ -665,6 +739,53 @@ class _PrintConfigurationCard extends StatelessWidget {
       PrinterProtocol.zpl => 'Direct raster via ZPL',
       _ => 'PDF via system print dialog',
     };
+  }
+}
+
+class _PrintJobSummary extends StatelessWidget {
+  const _PrintJobSummary({
+    required this.layout,
+    required this.selectedRecordCount,
+    required this.labelCount,
+  });
+
+  final LabelLayout layout;
+  final int selectedRecordCount;
+  final int labelCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AppTheme.paleBlueSurface,
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'This print job',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            _PrintSummaryLine(
+              label: 'Label size',
+              value:
+                  '${layout.widthMm.toStringAsFixed(0)} × ${layout.heightMm.toStringAsFixed(0)} mm',
+            ),
+            const SizedBox(height: 8),
+            _PrintSummaryLine(
+              label: 'Selected products',
+              value: '$selectedRecordCount',
+            ),
+            const SizedBox(height: 8),
+            _PrintSummaryLine(label: 'Labels to print', value: '$labelCount'),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -699,6 +820,9 @@ class _PrintSummaryLine extends StatelessWidget {
   }
 }
 
+// The profile screen now owns this workflow. It remains temporarily while
+// preserving the existing network-profile dialog during the settings migration.
+// ignore: unused_element
 class _PrinterProfilesCard extends StatelessWidget {
   const _PrinterProfilesCard({
     required this.profiles,

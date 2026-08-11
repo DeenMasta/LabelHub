@@ -7,6 +7,15 @@ abstract interface class LabelPrinter {
   Future<void> disconnect();
 }
 
+/// Optional capability for TSPL printers that can measure the currently
+/// installed label media with their gap sensor.
+abstract interface class TsplMediaCalibratingPrinter {
+  Future<PrintResult> calibrateTsplMedia({
+    required double widthMm,
+    required double heightMm,
+  });
+}
+
 class PrinterDevice {
   const PrinterDevice({
     required this.id,
@@ -32,6 +41,7 @@ enum PrinterProtocol { systemPdf, escPos, tspl, zpl }
 class PrintRequest {
   const PrintRequest({
     required this.recordIds,
+    required this.labels,
     required this.copies,
     required this.pdfBytes,
     required this.documentName,
@@ -40,11 +50,25 @@ class PrintRequest {
   });
 
   final List<String> recordIds;
+  final List<PrintLabelData> labels;
   final int copies;
   final Uint8List pdfBytes;
   final String documentName;
   final double labelWidthMm;
   final double labelHeightMm;
+}
+
+/// Printer-independent label content prepared from a product record.
+class PrintLabelData {
+  const PrintLabelData({
+    required this.primaryText,
+    required this.secondaryText,
+    required this.barcodeValue,
+  });
+
+  final String primaryText;
+  final String secondaryText;
+  final String barcodeValue;
 }
 
 class PrintResult {

@@ -1,14 +1,17 @@
 import 'dart:io';
 
 import 'label_printer.dart';
+import 'thermal_raster_command_encoder.dart';
 import 'thermal_pdf_rasterizer.dart';
+import 'tspl_label_command_encoder.dart';
 
 /// Sends rasterized commands to a printer's TCP raw-print port.
 ///
 /// Network devices are deliberately supplied by a saved printer profile rather
 /// than being scanned automatically. This keeps the offline app predictable on
 /// managed networks and avoids sending traffic to unknown hosts.
-class NetworkThermalPrinter implements LabelPrinter {
+class NetworkThermalPrinter
+    implements LabelPrinter, TsplMediaCalibratingPrinter {
   NetworkThermalPrinter({
     ThermalPdfRasterizer rasterizer = const ThermalPdfRasterizer(),
   }) : _rasterizer = rasterizer;
@@ -58,13 +61,50 @@ class NetworkThermalPrinter implements LabelPrinter {
       );
     }
     try {
-      final commands = await _rasterizer.commandsFor(
-        request,
-        protocol: device.protocol,
-        widthMm: request.labelWidthMm,
-        heightMm: request.labelHeightMm,
-      );
+      final commands = device.protocol == PrinterProtocol.tspl
+          ? const TsplLabelCommandEncoder().encode(request)
+          : await _rasterizer.commandsFor(
+              request,
+              protocol: device.protocol,
+              widthMm: request.labelWidthMm,
+              heightMm: request.labelHeightMm,
+            );
       socket.add(commands);
+      await socket.flush();
+      return const PrintResult(succeeded: true);
+    } on SocketException catch (error) {
+      return PrintResult(succeeded: false, message: error.message);
+    } on Exception catch (error) {
+      return PrintResult(succeeded: false, message: error.toString());
+    }
+  }
+
+  @override
+  Future<PrintResult> calibrateTsplMedia({
+    required double widthMm,
+    required double heightMm,
+  }) async {
+    final socket = _socket;
+    final device = _connectedDevice;
+    if (socket == null || device == null) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Connect a network printer before calibrating media.',
+      );
+    }
+    if (device.protocol != PrinterProtocol.tspl) {
+      return const PrintResult(
+        succeeded: false,
+        message: 'Media calibration is available only for TSPL label printers.',
+      );
+    }
+    try {
+      socket.add(
+        const ThermalRasterCommandEncoder().tsplMediaCalibration(
+          widthMm: widthMm,
+          heightMm: heightMm,
+        ),
+      );
       await socket.flush();
       return const PrintResult(succeeded: true);
     } on SocketException catch (error) {
