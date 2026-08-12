@@ -49,7 +49,6 @@ void main() {
       name: 'Warehouse ZYWELL',
       host: '192.168.1.30',
       port: 9100,
-      protocol: PrinterProtocol.tspl,
     );
     await printerProfiles.setDefault('warehouse-zywell');
   });

@@ -76,7 +76,6 @@ void main() {
 
     await tester.tap(find.text('Add network printer'));
     await tester.pumpAndSettle();
-    expect(find.text('TSPL'), findsOneWidget);
     await tester.enterText(find.byType(TextField).at(0), 'Warehouse Zebra');
     await tester.enterText(find.byType(TextField).at(1), 'printer.local');
     await tester.enterText(find.byType(TextField).at(2), '9100');
@@ -100,7 +99,6 @@ class _FakeBluetoothPrinter implements LabelPrinter {
       id: 'AA:BB:CC:DD:EE:FF#tspl',
       name: 'Pocket label printer — barcode labels (TSPL)',
       kind: PrinterKind.bluetooth,
-      protocol: PrinterProtocol.tspl,
     ),
   ];
 

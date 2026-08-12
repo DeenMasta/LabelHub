@@ -1,20 +1,15 @@
 import 'package:flutter/services.dart';
 
 import 'label_printer.dart';
-import 'thermal_raster_command_encoder.dart';
-import 'thermal_pdf_rasterizer.dart';
 import 'tspl_label_command_encoder.dart';
 
 /// Prints to Android USB host-mode printers exposed by the platform channel.
 class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
   UsbThermalPrinter({
     MethodChannel channel = const MethodChannel('labelhub/usb_printer'),
-    ThermalPdfRasterizer rasterizer = const ThermalPdfRasterizer(),
-  }) : _channel = channel,
-       _rasterizer = rasterizer;
+  }) : _channel = channel;
 
   final MethodChannel _channel;
-  final ThermalPdfRasterizer _rasterizer;
   PrinterDevice? _connectedDevice;
 
   @override
@@ -47,22 +42,14 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
 
   @override
   Future<PrintResult> printLabels(PrintRequest request) async {
-    final device = _connectedDevice;
-    if (device == null) {
+    if (_connectedDevice == null) {
       return const PrintResult(
         succeeded: false,
         message: 'Connect a USB printer before printing.',
       );
     }
     try {
-      final commands = device.protocol == PrinterProtocol.tspl
-          ? const TsplLabelCommandEncoder().encode(request)
-          : await _rasterizer.commandsFor(
-              request,
-              protocol: device.protocol,
-              widthMm: request.labelWidthMm,
-              heightMm: request.labelHeightMm,
-            );
+      final commands = const TsplLabelCommandEncoder().encode(request);
       await _channel.invokeMethod<void>('write', commands);
       return const PrintResult(succeeded: true);
     } on Exception catch (error) {
@@ -75,23 +62,16 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
     required double widthMm,
     required double heightMm,
   }) async {
-    final device = _connectedDevice;
-    if (device == null) {
+    if (_connectedDevice == null) {
       return const PrintResult(
         succeeded: false,
         message: 'Connect a USB printer before calibrating media.',
       );
     }
-    if (device.protocol != PrinterProtocol.tspl) {
-      return const PrintResult(
-        succeeded: false,
-        message: 'Media calibration is available only for TSPL label printers.',
-      );
-    }
     try {
       await _channel.invokeMethod<void>(
         'write',
-        const ThermalRasterCommandEncoder().tsplMediaCalibration(
+        const TsplLabelCommandEncoder().mediaCalibration(
           widthMm: widthMm,
           heightMm: heightMm,
         ),
@@ -109,25 +89,12 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
     }
     final name = device['name']?.toString().trim();
     final displayName = name == null || name.isEmpty ? 'USB printer $id' : name;
-    for (final protocol in <PrinterProtocol>[
-      PrinterProtocol.tspl,
-      PrinterProtocol.zpl,
-      PrinterProtocol.escPos,
-    ]) {
-      yield PrinterDevice(
-        id: '$id#${protocol.name}',
-        name: '$displayName — ${_protocolName(protocol)}',
-        kind: PrinterKind.usb,
-        protocol: protocol,
-      );
-    }
+    yield PrinterDevice(
+      id: '$id#tspl',
+      name: '$displayName — barcode labels (TSPL)',
+      kind: PrinterKind.usb,
+    );
   }
 
   String _deviceIdFor(String id) => id.split('#').first;
-
-  String _protocolName(PrinterProtocol protocol) => switch (protocol) {
-    PrinterProtocol.tspl => 'barcode labels (TSPL)',
-    PrinterProtocol.zpl => 'barcode labels (ZPL)',
-    PrinterProtocol.escPos => 'receipt (ESC/POS)',
-  };
 }

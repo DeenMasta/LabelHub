@@ -7,7 +7,6 @@ class PrinterProfile {
     required this.id,
     required this.name,
     required this.kind,
-    required this.protocol,
     required this.address,
     this.port,
   });
@@ -15,19 +14,18 @@ class PrinterProfile {
   final String id;
   final String name;
   final PrinterKind kind;
-  final PrinterProtocol protocol;
   final String address;
   final int? port;
 
   PrinterDevice toDevice() {
-    final id = switch (kind) {
+    final deviceId = switch (kind) {
       PrinterKind.network when port != null => NetworkPrinterEndpoint.deviceId(
         host: address,
         port: port!,
       ),
-      PrinterKind.bluetooth => '$address#${protocol.name}',
+      PrinterKind.bluetooth => '$address#tspl',
       _ => throw StateError('The printer profile is incomplete.'),
     };
-    return PrinterDevice(id: id, name: name, kind: kind, protocol: protocol);
+    return PrinterDevice(id: deviceId, name: name, kind: kind);
   }
 }

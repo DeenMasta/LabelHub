@@ -1,18 +1,15 @@
 import 'bluetooth_thermal_printer.dart';
 import 'label_printer.dart';
 import 'network_thermal_printer.dart';
-import 'sunmi_inner_printer.dart';
 import 'usb_thermal_printer.dart';
 
 /// Coordinates printer adapters without exposing platform details to UI code.
 class PrinterCatalog {
   PrinterCatalog({
-    LabelPrinter? sunmiPrinter,
     LabelPrinter? bluetoothPrinter,
     LabelPrinter? usbPrinter,
     LabelPrinter? networkPrinter,
   }) : _printers = <PrinterKind, LabelPrinter>{
-         PrinterKind.sunmiInner: sunmiPrinter ?? SunmiInnerPrinter(),
          PrinterKind.bluetooth: bluetoothPrinter ?? BluetoothThermalPrinter(),
          PrinterKind.usb: usbPrinter ?? UsbThermalPrinter(),
          PrinterKind.network: networkPrinter ?? NetworkThermalPrinter(),

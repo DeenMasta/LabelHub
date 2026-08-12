@@ -16,21 +16,19 @@ void main() {
   tearDown(() => database.close());
 
   test(
-    'stores a named network printer profile for direct ZPL printing',
+    'stores a named network printer profile for direct TSPL printing',
     () async {
       await repository.saveNetwork(
-        id: 'warehouse-zebra',
-        name: 'Warehouse Zebra',
+        id: 'warehouse-zywell',
+        name: 'Warehouse ZYWELL',
         host: '192.168.1.25',
         port: 9100,
-        protocol: PrinterProtocol.zpl,
       );
 
       final profiles = await repository.list();
 
       expect(profiles, hasLength(1));
-      expect(profiles.single.name, 'Warehouse Zebra');
-      expect(profiles.single.protocol, PrinterProtocol.zpl);
+      expect(profiles.single.name, 'Warehouse ZYWELL');
       expect(profiles.single.toDevice().id, 'network:192.168.1.25:9100');
     },
   );
@@ -42,7 +40,6 @@ void main() {
         name: 'Invalid printer',
         host: 'printer.local',
         port: 70000,
-        protocol: PrinterProtocol.tspl,
       ),
       throwsA(isA<PrinterProfileException>()),
     );
@@ -53,7 +50,6 @@ void main() {
       id: 'stockroom-bluetooth',
       name: 'Stockroom label printer',
       address: 'AA:BB:CC:DD:EE:FF',
-      protocol: PrinterProtocol.tspl,
     );
 
     final profile = (await repository.list()).single;
@@ -68,7 +64,6 @@ void main() {
       name: 'Warehouse ZYWELL',
       host: '192.168.1.30',
       port: 9100,
-      protocol: PrinterProtocol.tspl,
     );
 
     await repository.setDefault('warehouse-zywell');

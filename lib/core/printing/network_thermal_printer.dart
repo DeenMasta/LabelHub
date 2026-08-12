@@ -1,22 +1,17 @@
 import 'dart:io';
 
 import 'label_printer.dart';
-import 'thermal_raster_command_encoder.dart';
-import 'thermal_pdf_rasterizer.dart';
 import 'tspl_label_command_encoder.dart';
 
-/// Sends rasterized commands to a printer's TCP raw-print port.
+/// Sends native TSPL commands to a printer's TCP raw-print port.
 ///
 /// Network devices are deliberately supplied by a saved printer profile rather
 /// than being scanned automatically. This keeps the offline app predictable on
 /// managed networks and avoids sending traffic to unknown hosts.
 class NetworkThermalPrinter
     implements LabelPrinter, TsplMediaCalibratingPrinter {
-  NetworkThermalPrinter({
-    ThermalPdfRasterizer rasterizer = const ThermalPdfRasterizer(),
-  }) : _rasterizer = rasterizer;
+  NetworkThermalPrinter();
 
-  final ThermalPdfRasterizer _rasterizer;
   Socket? _socket;
   PrinterDevice? _connectedDevice;
 
@@ -53,22 +48,14 @@ class NetworkThermalPrinter
   @override
   Future<PrintResult> printLabels(PrintRequest request) async {
     final socket = _socket;
-    final device = _connectedDevice;
-    if (socket == null || device == null) {
+    if (socket == null || _connectedDevice == null) {
       return const PrintResult(
         succeeded: false,
         message: 'Connect a network printer before printing.',
       );
     }
     try {
-      final commands = device.protocol == PrinterProtocol.tspl
-          ? const TsplLabelCommandEncoder().encode(request)
-          : await _rasterizer.commandsFor(
-              request,
-              protocol: device.protocol,
-              widthMm: request.labelWidthMm,
-              heightMm: request.labelHeightMm,
-            );
+      final commands = const TsplLabelCommandEncoder().encode(request);
       socket.add(commands);
       await socket.flush();
       return const PrintResult(succeeded: true);
@@ -85,22 +72,15 @@ class NetworkThermalPrinter
     required double heightMm,
   }) async {
     final socket = _socket;
-    final device = _connectedDevice;
-    if (socket == null || device == null) {
+    if (socket == null || _connectedDevice == null) {
       return const PrintResult(
         succeeded: false,
         message: 'Connect a network printer before calibrating media.',
       );
     }
-    if (device.protocol != PrinterProtocol.tspl) {
-      return const PrintResult(
-        succeeded: false,
-        message: 'Media calibration is available only for TSPL label printers.',
-      );
-    }
     try {
       socket.add(
-        const ThermalRasterCommandEncoder().tsplMediaCalibration(
+        const TsplLabelCommandEncoder().mediaCalibration(
           widthMm: widthMm,
           heightMm: heightMm,
         ),
@@ -127,14 +107,14 @@ class NetworkPrinterEndpoint {
   static NetworkPrinterEndpoint fromDeviceId(String id) {
     final parts = id.split(':');
     if (parts.length < 3 || parts.first != 'network') {
-      throw const ThermalPrintingException(
+      throw const TsplPrintingException(
         'The network printer address is invalid.',
       );
     }
     final port = int.tryParse(parts.last);
     final host = parts.sublist(1, parts.length - 1).join(':');
     if (host.isEmpty || port == null || port < 1 || port > 65535) {
-      throw const ThermalPrintingException(
+      throw const TsplPrintingException(
         'The network printer address is invalid.',
       );
     }

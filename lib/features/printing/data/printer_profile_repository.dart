@@ -18,7 +18,6 @@ class PrinterProfileRepository {
             id: profile.id,
             name: profile.name,
             kind: PrinterKind.values.byName(profile.printerKind),
-            protocol: PrinterProtocol.values.byName(profile.printerProtocol),
             address: profile.address,
             port: profile.port,
           ),
@@ -31,7 +30,6 @@ class PrinterProfileRepository {
     required String name,
     required String host,
     required int port,
-    required PrinterProtocol protocol,
   }) async {
     final trimmedName = name.trim();
     final trimmedHost = host.trim();
@@ -50,20 +48,11 @@ class PrinterProfileRepository {
         'Enter a network port from 1 to 65535.',
       );
     }
-    if (!<PrinterProtocol>{
-      PrinterProtocol.tspl,
-      PrinterProtocol.zpl,
-      PrinterProtocol.escPos,
-    }.contains(protocol)) {
-      throw const PrinterProfileException(
-        'Select a direct-printer command language.',
-      );
-    }
     await _database.savePrinterProfile(
       id: id,
       name: trimmedName,
       printerKind: PrinterKind.network.name,
-      printerProtocol: protocol.name,
+      printerProtocol: 'tspl',
       address: trimmedHost,
       port: port,
     );
@@ -73,7 +62,6 @@ class PrinterProfileRepository {
     required String id,
     required String name,
     required String address,
-    required PrinterProtocol protocol,
   }) async {
     final trimmedName = name.trim();
     final trimmedAddress = address.trim();
@@ -89,20 +77,11 @@ class PrinterProfileRepository {
         'The paired Bluetooth printer address is invalid.',
       );
     }
-    if (!<PrinterProtocol>{
-      PrinterProtocol.tspl,
-      PrinterProtocol.zpl,
-      PrinterProtocol.escPos,
-    }.contains(protocol)) {
-      throw const PrinterProfileException(
-        'Select a direct-printer command language.',
-      );
-    }
     await _database.savePrinterProfile(
       id: id,
       name: trimmedName,
       printerKind: PrinterKind.bluetooth.name,
-      printerProtocol: protocol.name,
+      printerProtocol: 'tspl',
       address: trimmedAddress,
     );
   }

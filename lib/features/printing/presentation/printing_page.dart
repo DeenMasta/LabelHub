@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -8,14 +8,13 @@ import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/printing/label_printer.dart';
 import '../../../core/printing/printer_catalog.dart';
-import '../../../core/printing/thermal_pdf_rasterizer.dart';
+import '../../../core/printing/tspl_label_command_encoder.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
 import '../../labels/presentation/widgets/record_selector_card.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
-import '../data/pdf_label_document_generator.dart';
 import '../data/print_job_repository.dart';
 import '../data/printer_profile_repository.dart';
 import '../domain/entities/print_job.dart';
@@ -42,7 +41,6 @@ class PrintingPage extends ConsumerStatefulWidget {
 }
 
 class _PrintingPageState extends ConsumerState<PrintingPage> {
-  static const _documentGenerator = PdfLabelDocumentGenerator();
 
   late final PrinterCatalog _printerCatalog;
   final Set<String> _selectedRecordIds = <String>{};
@@ -167,13 +165,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     PrintJobRepository? repository;
     LabelPrinter? connectedPrinter;
     try {
-      final pdfBytes = await _documentGenerator.generate(
-        records: records,
-        copies: _copies,
-        layout: _layout,
-        primaryFieldKey: _primaryFieldKey,
-        secondaryFieldKey: _secondaryFieldKey,
-      );
       final database = await ref.read(appDatabaseProvider.future);
       repository = PrintJobRepository(database);
       jobId = const Uuid().v4();
@@ -202,8 +193,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
               )
               .toList(),
           copies: _copies,
-          pdfBytes: pdfBytes,
-          documentName: 'LabelHub product labels',
           labelWidthMm: _layout.widthMm,
           labelHeightMm: _layout.heightMm,
         ),
@@ -242,13 +231,8 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     LabelPrinter printer,
     PrinterDevice selectedPrinter,
   ) async {
-    if (selectedPrinter.protocol != PrinterProtocol.tspl) {
-      return;
-    }
     if (printer is! TsplMediaCalibratingPrinter) {
-      throw const ThermalPrintingException(
-        'The selected printer does not support automatic TSPL media calibration.',
-      );
+      return;
     }
     final calibratingPrinter = printer as TsplMediaCalibratingPrinter;
     if (mounted) {
@@ -260,7 +244,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         heightMm: _layout.heightMm,
       );
       if (!result.succeeded) {
-        throw ThermalPrintingException(
+        throw TsplPrintingException(
           result.message ?? 'The printer could not calibrate the label media.',
         );
       }
@@ -282,8 +266,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       return 'Allow Nearby devices permission to use paired Bluetooth printers, then try again.';
     }
     return switch (error) {
-      PdfLabelDocumentException exception => exception.message,
-      ThermalPrintingException exception => exception.message,
+      TsplPrintingException exception => exception.message,
       PrinterProfileException exception => exception.message,
       PlatformException exception =>
         exception.message ?? 'The selected printer could not be reached.',
@@ -481,9 +464,9 @@ class _PrintConfigurationCard extends StatelessWidget {
                   : const Icon(Icons.print_outlined),
               label: Text(
                 isCalibratingMedia
-                    ? 'Calibrating label media…'
+                    ? 'Calibrating label mediaâ€¦'
                     : isPrinting
-                    ? 'Preparing print…'
+                    ? 'Preparing printâ€¦'
                     : 'Print $labelCount ${labelCount == 1 ? 'label' : 'labels'}',
               ),
             ),
@@ -494,218 +477,7 @@ class _PrintConfigurationCard extends StatelessWidget {
   }
 }
 
-// The profile screen now owns this workflow. It remains temporarily while
-// preserving the existing network-profile dialog during the settings migration.
-// ignore: unused_element
-class _PrinterProfilesCard extends StatelessWidget {
-  const _PrinterProfilesCard({
-    required this.profiles,
-    required this.onSaveNetwork,
-    required this.onDelete,
-  });
 
-  final List<PrinterProfile> profiles;
-  final Future<void> Function({
-    required String name,
-    required String host,
-    required int port,
-    required PrinterProtocol protocol,
-  })
-  onSaveNetwork;
-  final Future<void> Function(PrinterProfile profile) onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    'Printer profiles',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => _showNetworkProfileDialog(context),
-                  icon: const Icon(Icons.add_link_rounded),
-                  label: const Text('Add network printer'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Save a TCP printer address and its command language for offline direct printing.',
-            ),
-            const SizedBox(height: 12),
-            if (profiles.isEmpty)
-              const Text('No network printer profiles have been saved yet.')
-            else
-              for (final profile in profiles) ...<Widget>[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.print_outlined),
-                  title: Text(profile.name),
-                  subtitle: Text(
-                    '${profile.address}:${profile.port} · ${_protocolLabel(profile.protocol)}',
-                  ),
-                  trailing: IconButton(
-                    tooltip: 'Delete ${profile.name}',
-                    onPressed: () => onDelete(profile),
-                    icon: const Icon(Icons.delete_outline_rounded),
-                  ),
-                ),
-                if (profile != profiles.last) const Divider(height: 16),
-              ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showNetworkProfileDialog(BuildContext context) async {
-    final nameController = TextEditingController();
-    final hostController = TextEditingController();
-    final portController = TextEditingController(text: '9100');
-    var protocol = PrinterProtocol.zpl;
-    String? errorMessage;
-    var isSaving = false;
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setDialogState) {
-            return AlertDialog(
-              title: const Text('Add network printer'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    TextField(
-                      controller: nameController,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Profile name',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: hostController,
-                      keyboardType: TextInputType.url,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'IP address or host name',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: portController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'TCP port'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<PrinterProtocol>(
-                      initialValue: protocol,
-                      decoration: const InputDecoration(
-                        labelText: 'Command language',
-                      ),
-                      items: const <DropdownMenuItem<PrinterProtocol>>[
-                        DropdownMenuItem(
-                          value: PrinterProtocol.zpl,
-                          child: Text('ZPL'),
-                        ),
-                        DropdownMenuItem(
-                          value: PrinterProtocol.tspl,
-                          child: Text('TSPL'),
-                        ),
-                        DropdownMenuItem(
-                          value: PrinterProtocol.escPos,
-                          child: Text('ESC/POS'),
-                        ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (PrinterProtocol? value) {
-                              if (value != null) {
-                                setDialogState(() => protocol = value);
-                              }
-                            },
-                    ),
-                    if (errorMessage != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Text(
-                        errorMessage!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          final port = int.tryParse(portController.text.trim());
-                          if (port == null) {
-                            setDialogState(
-                              () => errorMessage = 'Enter a valid TCP port.',
-                            );
-                            return;
-                          }
-                          setDialogState(() {
-                            isSaving = true;
-                            errorMessage = null;
-                          });
-                          try {
-                            await onSaveNetwork(
-                              name: nameController.text,
-                              host: hostController.text,
-                              port: port,
-                              protocol: protocol,
-                            );
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                            }
-                          } on PrinterProfileException catch (error) {
-                            setDialogState(() => errorMessage = error.message);
-                          } finally {
-                            if (context.mounted) {
-                              setDialogState(() => isSaving = false);
-                            }
-                          }
-                        },
-                  child: Text(isSaving ? 'Saving…' : 'Save profile'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    nameController.dispose();
-    hostController.dispose();
-    portController.dispose();
-  }
-
-  String _protocolLabel(PrinterProtocol protocol) => switch (protocol) {
-    PrinterProtocol.zpl => 'ZPL',
-    PrinterProtocol.tspl => 'TSPL',
-    PrinterProtocol.escPos => 'ESC/POS',
-  };
-}
 
 class _RecentPrintJobsCard extends StatelessWidget {
   const _RecentPrintJobsCard({required this.printJobs});
@@ -766,7 +538,7 @@ class _PrintJobRow extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: Text(
-                '${job.labelCount} labels · ${job.printerName}',
+                '${job.labelCount} labels Â· ${job.printerName}',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
@@ -778,7 +550,7 @@ class _PrintJobRow extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '${job.recordCount} records × ${job.copies} copies · ${_formatTimestamp(timestamp)}',
+          '${job.recordCount} records Ã— ${job.copies} copies Â· ${_formatTimestamp(timestamp)}',
         ),
         if (job.errorMessage != null) ...<Widget>[
           const SizedBox(height: 4),

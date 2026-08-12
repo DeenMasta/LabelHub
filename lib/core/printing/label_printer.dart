@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 abstract interface class LabelPrinter {
   Future<List<PrinterDevice>> discover();
   Future<void> connect(PrinterDevice device);
@@ -21,30 +19,20 @@ class PrinterDevice {
     required this.id,
     required this.name,
     required this.kind,
-    required this.protocol,
   });
 
   final String id;
   final String name;
   final PrinterKind kind;
-  final PrinterProtocol protocol;
 }
 
-enum PrinterKind { sunmiInner, bluetooth, usb, network }
-
-/// The command language used at the printer boundary.
-///
-/// ESC/POS is used by receipt printers; TSPL and ZPL are used by barcode-label
-/// printers.
-enum PrinterProtocol { escPos, tspl, zpl }
+enum PrinterKind { bluetooth, usb, network }
 
 class PrintRequest {
   const PrintRequest({
     required this.recordIds,
     required this.labels,
     required this.copies,
-    required this.pdfBytes,
-    required this.documentName,
     required this.labelWidthMm,
     required this.labelHeightMm,
   });
@@ -52,8 +40,6 @@ class PrintRequest {
   final List<String> recordIds;
   final List<PrintLabelData> labels;
   final int copies;
-  final Uint8List pdfBytes;
-  final String documentName;
   final double labelWidthMm;
   final double labelHeightMm;
 }

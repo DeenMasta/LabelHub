@@ -99,7 +99,6 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       id: const Uuid().v4(),
       name: device.name,
       kind: PrinterKind.bluetooth,
-      protocol: device.protocol,
       address: device.id.split('#').first,
     );
     try {
@@ -107,7 +106,6 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         id: profile.id,
         name: profile.name,
         address: profile.address,
-        protocol: profile.protocol,
       );
       final isFirstProfile = _defaultProfileId == null;
       if (isFirstProfile) {
@@ -136,7 +134,6 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     required String name,
     required String host,
     required int port,
-    required PrinterProtocol protocol,
   }) async {
     final database = await ref.read(appDatabaseProvider.future);
     final repository = PrinterProfileRepository(database);
@@ -144,7 +141,6 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       id: const Uuid().v4(),
       name: name.trim(),
       kind: PrinterKind.network,
-      protocol: protocol,
       address: host.trim(),
       port: port,
     );
@@ -154,7 +150,6 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         name: profile.name,
         host: profile.address,
         port: port,
-        protocol: profile.protocol,
       );
       final isFirstProfile = _defaultProfileId == null;
       if (isFirstProfile) {
@@ -206,8 +201,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   bool _isSaved(PrinterDevice device) => _profiles.any(
     (PrinterProfile profile) =>
         profile.kind == PrinterKind.bluetooth &&
-        profile.address == device.id.split('#').first &&
-        profile.protocol == device.protocol,
+        profile.address == device.id.split('#').first,
   );
 
   @override
@@ -279,7 +273,6 @@ class _NetworkPrinterSetupCard extends StatelessWidget {
     required String name,
     required String host,
     required int port,
-    required PrinterProtocol protocol,
   })
   onSave;
 
@@ -319,7 +312,6 @@ class _NetworkPrinterSetupCard extends StatelessWidget {
     final nameController = TextEditingController();
     final hostController = TextEditingController();
     final portController = TextEditingController(text: '9100');
-    var protocol = PrinterProtocol.tspl;
     String? errorMessage;
     var isSaving = false;
     var hasSaved = false;
@@ -356,34 +348,6 @@ class _NetworkPrinterSetupCard extends StatelessWidget {
                       controller: portController,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(labelText: 'TCP port'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<PrinterProtocol>(
-                      initialValue: protocol,
-                      decoration: const InputDecoration(
-                        labelText: 'Command language',
-                      ),
-                      items: const <DropdownMenuItem<PrinterProtocol>>[
-                        DropdownMenuItem(
-                          value: PrinterProtocol.zpl,
-                          child: Text('ZPL'),
-                        ),
-                        DropdownMenuItem(
-                          value: PrinterProtocol.tspl,
-                          child: Text('TSPL'),
-                        ),
-                        DropdownMenuItem(
-                          value: PrinterProtocol.escPos,
-                          child: Text('ESC/POS'),
-                        ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (PrinterProtocol? value) {
-                              if (value != null) {
-                                setDialogState(() => protocol = value);
-                              }
-                            },
                     ),
                     if (errorMessage != null) ...<Widget>[
                       const SizedBox(height: 12),
@@ -422,7 +386,6 @@ class _NetworkPrinterSetupCard extends StatelessWidget {
                               name: nameController.text,
                               host: hostController.text,
                               port: port,
-                              protocol: protocol,
                             );
                             if (context.mounted) {
                               hasSaved = true;
@@ -503,7 +466,7 @@ class _PairedBluetoothPrintersCard extends StatelessWidget {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.bluetooth_rounded),
                   title: Text(device.name),
-                  subtitle: Text(_protocolDescription(device.protocol)),
+                  subtitle: Text(_protocolDescription(device)),
                   trailing: isSaved(device)
                       ? const Chip(label: Text('Saved'))
                       : FilledButton(
@@ -523,11 +486,7 @@ class _PairedBluetoothPrintersCard extends StatelessWidget {
     );
   }
 
-  String _protocolDescription(PrinterProtocol protocol) => switch (protocol) {
-    PrinterProtocol.zpl => 'Barcode labels — ZPL',
-    PrinterProtocol.tspl => 'Barcode labels — TSPL',
-    PrinterProtocol.escPos => 'Receipt printer — ESC/POS',
-  };
+  String _protocolDescription(PrinterDevice device) => 'TSPL barcode label printer';
 }
 
 class _SavedPrinterProfilesCard extends StatelessWidget {
@@ -607,14 +566,9 @@ class _SavedPrinterProfilesCard extends StatelessWidget {
   }
 
   String _profileDescription(PrinterProfile profile) {
-    final protocol = switch (profile.protocol) {
-      PrinterProtocol.zpl => 'ZPL',
-      PrinterProtocol.tspl => 'TSPL',
-      PrinterProtocol.escPos => 'ESC/POS',
-    };
     return profile.kind == PrinterKind.bluetooth
-        ? '$protocol · ${profile.address}'
-        : '$protocol · ${profile.address}:${profile.port}';
+        ? 'TSPL · ${profile.address}'
+        : 'TSPL · ${profile.address}:${profile.port}';
   }
 }
 

@@ -5,7 +5,7 @@ import 'label_printer.dart';
 /// Produces native TSPL commands for a 203-DPI product label.
 ///
 /// This uses the printer's text and Code 128 commands instead of rasterizing a
-/// PDF or bitmap before printing.
+/// bitmap before printing.
 class TsplLabelCommandEncoder {
   const TsplLabelCommandEncoder();
 
@@ -43,6 +43,17 @@ class TsplLabelCommandEncoder {
     return Uint8List.fromList(commands.toString().codeUnits);
   }
 
+  /// Configures the physical label bounds and asks the printer to measure the
+  /// gap on the installed media. This moves the media and is intentionally
+  /// separate from normal printing.
+  Uint8List mediaCalibration({
+    required double widthMm,
+    required double heightMm,
+  }) => _ascii(
+    'SIZE ${_millimetres(widthMm)} mm,${_millimetres(heightMm)} mm\r\n'
+    'GAPDETECT\r\n',
+  );
+
   void _validate(PrintLabelData label) {
     for (final value in <String>[
       label.primaryText,
@@ -65,6 +76,17 @@ class TsplLabelCommandEncoder {
   void _writeLine(StringBuffer buffer, String value) =>
       buffer.write('$value\r\n');
 
+  Uint8List _ascii(String value) => Uint8List.fromList(value.codeUnits);
+
   String _millimetres(double value) =>
       value.toStringAsFixed(value == value.roundToDouble() ? 0 : 1);
+}
+
+class TsplPrintingException implements Exception {
+  const TsplPrintingException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

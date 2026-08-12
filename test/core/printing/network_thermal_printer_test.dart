@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/core/printing/network_thermal_printer.dart';
-import 'package:labelhub/core/printing/thermal_pdf_rasterizer.dart';
+import 'package:labelhub/core/printing/tspl_label_command_encoder.dart';
 
 void main() {
   test('round-trips a network printer endpoint from its device identifier', () {
@@ -15,7 +15,7 @@ void main() {
   test('rejects an unusable network printer endpoint', () {
     expect(
       () => NetworkPrinterEndpoint.fromDeviceId('network:printer.local:0'),
-      throwsA(isA<ThermalPrintingException>()),
+      throwsA(isA<TsplPrintingException>()),
     );
   });
 }

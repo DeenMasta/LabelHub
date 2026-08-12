@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/core/printing/label_printer.dart';
 import 'package:labelhub/core/printing/tspl_label_command_encoder.dart';
@@ -17,8 +15,6 @@ void main() {
       ),
     ],
     copies: 1,
-    pdfBytes: Uint8List(0),
-    documentName: 'Product labels',
     labelWidthMm: 40,
     labelHeightMm: 30,
   );
