@@ -45,6 +45,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Save'), findsOneWidget);
+    final saveButton = find.widgetWithText(FilledButton, 'Save');
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Default'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

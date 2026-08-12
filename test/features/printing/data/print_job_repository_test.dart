@@ -17,7 +17,7 @@ void main() {
   test('stores completed and failed print jobs locally', () async {
     await repository.create(
       id: 'job-completed',
-      printerName: 'System print dialog',
+      printerName: 'Warehouse Zebra',
       labelLayoutId: 'product-label-58x40',
       recordCount: 2,
       copies: 3,
@@ -25,7 +25,7 @@ void main() {
     await repository.markCompleted('job-completed');
     await repository.create(
       id: 'job-failed',
-      printerName: 'System print dialog',
+      printerName: 'Warehouse Zebra',
       labelLayoutId: 'product-label-58x40',
       recordCount: 1,
       copies: 1,

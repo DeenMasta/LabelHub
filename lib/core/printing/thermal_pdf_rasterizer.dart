@@ -42,9 +42,6 @@ class ThermalPdfRasterizer {
           widthMm: widthMm,
           heightMm: heightMm,
         ),
-        PrinterProtocol.systemPdf => throw const ThermalPrintingException(
-          'The system print dialog does not accept thermal commands.',
-        ),
       });
     }
     if (output.length == 0) {

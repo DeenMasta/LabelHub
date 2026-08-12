@@ -30,13 +30,13 @@ class PrinterDevice {
   final PrinterProtocol protocol;
 }
 
-enum PrinterKind { systemPdf, sunmiInner, bluetooth, usb, network }
+enum PrinterKind { sunmiInner, bluetooth, usb, network }
 
 /// The command language used at the printer boundary.
 ///
-/// ESC/POS is used by receipt printers; TSPL is used by most barcode-label
-/// printers. PDF remains available through the Android system print dialog.
-enum PrinterProtocol { systemPdf, escPos, tspl, zpl }
+/// ESC/POS is used by receipt printers; TSPL and ZPL are used by barcode-label
+/// printers.
+enum PrinterProtocol { escPos, tspl, zpl }
 
 class PrintRequest {
   const PrintRequest({

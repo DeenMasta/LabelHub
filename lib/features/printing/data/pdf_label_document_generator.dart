@@ -12,7 +12,7 @@ import '../../records/domain/entities/catalogue_record.dart';
 import '../../templates/data/builtin_templates.dart';
 import '../../templates/domain/entities/import_template.dart';
 
-/// Builds physically sized, one-label-per-page PDFs for the system printer.
+/// Builds physically sized, one-label-per-page PDFs for direct-printer output.
 class PdfLabelDocumentGenerator {
   const PdfLabelDocumentGenerator({
     BarcodePreviewService barcodePreviewService = const BarcodePreviewService(),
@@ -151,7 +151,7 @@ class PdfLabelDocumentGenerator {
 
   String _valueFor(CatalogueRecord record, String fieldKey) {
     final value = record.values[fieldKey]?.trim();
-    return value == null || value.isEmpty ? '-' : value;
+    return value ?? '';
   }
 
   Barcode _barcodeFor(BarcodeFormat format) {

@@ -6,6 +6,8 @@ import '../domain/entities/printer_profile.dart';
 class PrinterProfileRepository {
   PrinterProfileRepository(this._database);
 
+  static const _defaultProfileMetadataKey = 'default_printer_profile_id';
+
   final AppDatabase _database;
 
   Future<List<PrinterProfile>> list() async {
@@ -105,7 +107,24 @@ class PrinterProfileRepository {
     );
   }
 
-  Future<void> delete(String id) => _database.deletePrinterProfile(id);
+  Future<String?> defaultProfileId() async {
+    final profileId = await _database.metadataValue(_defaultProfileMetadataKey);
+    return profileId == null || profileId.isEmpty ? null : profileId;
+  }
+
+  Future<void> setDefault(String profileId) {
+    return _database.saveMetadata(
+      key: _defaultProfileMetadataKey,
+      value: profileId,
+    );
+  }
+
+  Future<void> delete(String id) async {
+    await _database.deletePrinterProfile(id);
+    if (await defaultProfileId() == id) {
+      await _database.saveMetadata(key: _defaultProfileMetadataKey, value: '');
+    }
+  }
 }
 
 class PrinterProfileException implements Exception {

@@ -129,6 +129,5 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
     PrinterProtocol.tspl => 'barcode labels (TSPL)',
     PrinterProtocol.zpl => 'barcode labels (ZPL)',
     PrinterProtocol.escPos => 'receipt (ESC/POS)',
-    _ => 'PDF',
   };
 }

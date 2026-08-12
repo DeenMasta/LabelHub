@@ -41,6 +41,10 @@ final GoRouter appRouter = GoRouter(
             return PrintingPage(
               initialRecordIds: initialRecordIds,
               initialLayoutId: state.uri.queryParameters['layout'],
+              initialPrimaryFieldKey:
+                  state.uri.queryParameters['primaryField'] ?? 'item_name',
+              initialSecondaryFieldKey:
+                  state.uri.queryParameters['secondaryField'] ?? 'price',
             );
           },
         ),

@@ -26,6 +26,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   late final PrinterCatalog _printerCatalog;
   List<PrinterProfile> _profiles = const <PrinterProfile>[];
   List<PrinterDevice> _pairedDevices = const <PrinterDevice>[];
+  String? _defaultProfileId;
   String? _errorMessage;
   bool _isLoading = true;
   bool _isDiscovering = false;
@@ -40,10 +41,17 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   Future<void> _load() async {
     try {
       final database = await ref.read(appDatabaseProvider.future);
-      final profiles = await PrinterProfileRepository(database).list();
+      final repository = PrinterProfileRepository(database);
+      final results = await Future.wait<Object?>(<Future<Object?>>[
+        repository.list(),
+        repository.defaultProfileId(),
+      ]);
+      final profiles = results[0]! as List<PrinterProfile>;
+      final defaultProfileId = results[1] as String?;
       if (mounted) {
         setState(() {
           _profiles = profiles;
+          _defaultProfileId = defaultProfileId;
           _isLoading = false;
         });
       }
@@ -86,6 +94,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
   Future<void> _saveBluetoothProfile(PrinterDevice device) async {
     final database = await ref.read(appDatabaseProvider.future);
+    final repository = PrinterProfileRepository(database);
     final profile = PrinterProfile(
       id: const Uuid().v4(),
       name: device.name,
@@ -94,12 +103,16 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       address: device.id.split('#').first,
     );
     try {
-      await PrinterProfileRepository(database).saveBluetooth(
+      await repository.saveBluetooth(
         id: profile.id,
         name: profile.name,
         address: profile.address,
         protocol: profile.protocol,
       );
+      final isFirstProfile = _defaultProfileId == null;
+      if (isFirstProfile) {
+        await repository.setDefault(profile.id);
+      }
       if (mounted) {
         setState(() {
           _profiles = <PrinterProfile>[..._profiles, profile]
@@ -107,6 +120,9 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
               (PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name),
             );
           _errorMessage = null;
+          if (isFirstProfile) {
+            _defaultProfileId = profile.id;
+          }
         });
       }
     } on PrinterProfileException catch (error) {
@@ -123,6 +139,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     required PrinterProtocol protocol,
   }) async {
     final database = await ref.read(appDatabaseProvider.future);
+    final repository = PrinterProfileRepository(database);
     final profile = PrinterProfile(
       id: const Uuid().v4(),
       name: name.trim(),
@@ -132,13 +149,17 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       port: port,
     );
     try {
-      await PrinterProfileRepository(database).saveNetwork(
+      await repository.saveNetwork(
         id: profile.id,
         name: profile.name,
         host: profile.address,
         port: port,
         protocol: profile.protocol,
       );
+      final isFirstProfile = _defaultProfileId == null;
+      if (isFirstProfile) {
+        await repository.setDefault(profile.id);
+      }
       if (mounted) {
         setState(() {
           _profiles = <PrinterProfile>[..._profiles, profile]
@@ -146,6 +167,9 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
               (PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name),
             );
           _errorMessage = null;
+          if (isFirstProfile) {
+            _defaultProfileId = profile.id;
+          }
         });
       }
     } on PrinterProfileException catch (error) {
@@ -164,7 +188,18 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         _profiles = _profiles
             .where((PrinterProfile item) => item.id != profile.id)
             .toList();
+        if (_defaultProfileId == profile.id) {
+          _defaultProfileId = null;
+        }
       });
+    }
+  }
+
+  Future<void> _setDefaultProfile(PrinterProfile profile) async {
+    final database = await ref.read(appDatabaseProvider.future);
+    await PrinterProfileRepository(database).setDefault(profile.id);
+    if (mounted) {
+      setState(() => _defaultProfileId = profile.id);
     }
   }
 
@@ -187,7 +222,13 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         ),
         const SizedBox(height: 20),
         OutlinedButton.icon(
-          onPressed: () => context.go('/printing'),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+              return;
+            }
+            context.go('/printing');
+          },
           icon: const Icon(Icons.print_outlined),
           label: const Text('Back to print labels'),
         ),
@@ -204,7 +245,9 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
         const SizedBox(height: 20),
         _SavedPrinterProfilesCard(
           profiles: _profiles,
+          defaultProfileId: _defaultProfileId,
           isLoading: _isLoading,
+          onSetDefault: _setDefaultProfile,
           onDelete: _deleteProfile,
         ),
         if (_errorMessage != null) ...<Widget>[
@@ -484,19 +527,22 @@ class _PairedBluetoothPrintersCard extends StatelessWidget {
     PrinterProtocol.zpl => 'Barcode labels — ZPL',
     PrinterProtocol.tspl => 'Barcode labels — TSPL',
     PrinterProtocol.escPos => 'Receipt printer — ESC/POS',
-    PrinterProtocol.systemPdf => 'System PDF printer',
   };
 }
 
 class _SavedPrinterProfilesCard extends StatelessWidget {
   const _SavedPrinterProfilesCard({
     required this.profiles,
+    required this.defaultProfileId,
     required this.isLoading,
+    required this.onSetDefault,
     required this.onDelete,
   });
 
   final List<PrinterProfile> profiles;
+  final String? defaultProfileId;
   final bool isLoading;
+  final ValueChanged<PrinterProfile> onSetDefault;
   final ValueChanged<PrinterProfile> onDelete;
 
   @override
@@ -515,7 +561,7 @@ class _SavedPrinterProfilesCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             const Text(
-              'Saved printers are available from the print configuration.',
+              'The default printer is selected automatically for each print job.',
             ),
             const SizedBox(height: 12),
             if (isLoading)
@@ -533,10 +579,23 @@ class _SavedPrinterProfilesCard extends StatelessWidget {
                   ),
                   title: Text(profile.name),
                   subtitle: Text(_profileDescription(profile)),
-                  trailing: IconButton(
-                    tooltip: 'Delete ${profile.name}',
-                    onPressed: () => onDelete(profile),
-                    icon: const Icon(Icons.delete_outline_rounded),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (profile.id == defaultProfileId)
+                        const Chip(label: Text('Default'))
+                      else
+                        IconButton(
+                          tooltip: 'Set ${profile.name} as default',
+                          onPressed: () => onSetDefault(profile),
+                          icon: const Icon(Icons.star_outline_rounded),
+                        ),
+                      IconButton(
+                        tooltip: 'Delete ${profile.name}',
+                        onPressed: () => onDelete(profile),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
+                    ],
                   ),
                 ),
                 if (profile != profiles.last) const Divider(height: 16),
@@ -552,7 +611,6 @@ class _SavedPrinterProfilesCard extends StatelessWidget {
       PrinterProtocol.zpl => 'ZPL',
       PrinterProtocol.tspl => 'TSPL',
       PrinterProtocol.escPos => 'ESC/POS',
-      PrinterProtocol.systemPdf => 'PDF',
     };
     return profile.kind == PrinterKind.bluetooth
         ? '$protocol · ${profile.address}'

@@ -61,4 +61,22 @@ void main() {
     expect(profile.kind, PrinterKind.bluetooth);
     expect(profile.toDevice().id, 'AA:BB:CC:DD:EE:FF#tspl');
   });
+
+  test('persists and clears the default printer profile', () async {
+    await repository.saveNetwork(
+      id: 'warehouse-zywell',
+      name: 'Warehouse ZYWELL',
+      host: '192.168.1.30',
+      port: 9100,
+      protocol: PrinterProtocol.tspl,
+    );
+
+    await repository.setDefault('warehouse-zywell');
+
+    expect(await repository.defaultProfileId(), 'warehouse-zywell');
+
+    await repository.delete('warehouse-zywell');
+
+    expect(await repository.defaultProfileId(), isNull);
+  });
 }

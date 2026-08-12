@@ -8,6 +8,8 @@ class RecordSelectorCard extends StatelessWidget {
     required this.records,
     required this.selectedRecordIds,
     required this.onChanged,
+    required this.onSelectAll,
+    required this.onClearSelection,
     this.title = 'Records to preview',
     this.description = 'The first selected record is shown in the preview.',
     super.key,
@@ -16,6 +18,8 @@ class RecordSelectorCard extends StatelessWidget {
   final List<CatalogueRecord> records;
   final Set<String> selectedRecordIds;
   final void Function(CatalogueRecord record, bool selected) onChanged;
+  final VoidCallback onSelectAll;
+  final VoidCallback onClearSelection;
   final String title;
   final String description;
 
@@ -29,11 +33,21 @@ class RecordSelectorCard extends StatelessWidget {
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${selectedRecordIds.length} of ${records.length}',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ],
               ),
             ),
             Padding(
@@ -41,6 +55,27 @@ class RecordSelectorCard extends StatelessWidget {
               child: Text(description),
             ),
             const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: onSelectAll,
+                    icon: const Icon(Icons.done_all_rounded),
+                    label: Text('Select all ${records.length}'),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: selectedRecordIds.isEmpty
+                        ? null
+                        : onClearSelection,
+                    child: const Text('Clear all'),
+                  ),
+                ],
+              ),
+            ),
             for (final record in records)
               CheckboxListTile(
                 value: selectedRecordIds.contains(record.id),

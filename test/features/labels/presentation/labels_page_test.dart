@@ -1,70 +1,40 @@
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/app/theme/app_theme.dart';
-import 'package:labelhub/core/database/app_database.dart';
-import 'package:labelhub/core/database/database_provider.dart';
 import 'package:labelhub/features/labels/presentation/labels_page.dart';
 
 void main() {
-  testWidgets('shows a clear label preview before printing', (
+  testWidgets('configures a generic label preview before choosing products', (
     WidgetTester tester,
   ) async {
-    final database = await AppDatabase.openForTesting(NativeDatabase.memory());
-    addTearDown(database.close);
-    await database.upsertTemplate(
-      id: 'system-product-v1',
-      name: 'Product label',
-      description: '',
-      barcodeType: 'code128',
-      barcodeFieldKey: 'barcode',
-      isSystemTemplate: true,
-    );
-    await database.saveImportBatch(
-      batchId: 'batch-1',
-      templateId: 'system-product-v1',
-      fileName: 'products.csv',
-      totalRows: 1,
-      validRows: 1,
-      invalidRows: 0,
-      records: const <DatabaseRecordInsert>[
-        DatabaseRecordInsert(
-          id: 'record-1',
-          reference: 'ITEM-1001',
-          barcodeValue: 'ITEM-1001',
-          values: <String, String>{
-            'item_name': 'Blue T-Shirt',
-            'barcode': 'ITEM-1001',
-            'price': '29.90',
-          },
-        ),
-      ],
-    );
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          appDatabaseProvider.overrideWith((Ref ref) async => database),
-        ],
-        child: MaterialApp(
-          theme: AppTheme.light,
-          home: const Scaffold(body: LabelsPage()),
-        ),
+      MaterialApp(
+        theme: AppTheme.light,
+        home: const Scaffold(body: LabelsPage()),
       ),
     );
+
+    expect(find.text('1. Label content'), findsOneWidget);
+    expect(find.text('2. General preview'), findsOneWidget);
+    expect(find.text('DEMO-123456'), findsOneWidget);
+    expect(find.text('Blue T-Shirt'), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('1. Label content')).dy,
+      lessThan(tester.getTopLeft(find.text('2. General preview')).dy),
+    );
+
+    final secondLineSelector = find
+        .byType(DropdownButtonFormField<String>)
+        .at(1);
+    await tester.ensureVisible(secondLineSelector);
+    await tester.tap(secondLineSelector);
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.text('Continue to print 1 label'),
-      200,
-    );
-    expect(find.text('Preview'), findsOneWidget);
-    expect(find.text('Continue to print 1 label'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Label content'), 200);
-    expect(find.text('Label content'), findsOneWidget);
+    expect(find.text('No second line'), findsOneWidget);
+    expect(find.text('Choose products to print'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
