@@ -32,13 +32,6 @@ class BluetoothThermalPrinter
 
   @override
   Future<void> connect(PrinterDevice device) async {
-    if (device.kind != PrinterKind.bluetooth) {
-      throw ArgumentError.value(
-        device,
-        'device',
-        'Expected a Bluetooth printer.',
-      );
-    }
     await _requestBluetoothPermission();
     await _channel.invokeMethod<void>('connect', <String, Object?>{
       'address': _addressFor(device.id),
@@ -128,7 +121,6 @@ class BluetoothThermalPrinter
     yield PrinterDevice(
       id: '$address#tspl',
       name: '$displayName — barcode labels (TSPL)',
-      kind: PrinterKind.bluetooth,
     );
   }
 

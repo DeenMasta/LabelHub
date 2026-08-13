@@ -194,11 +194,12 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                style: destructive
-                    ? FilledButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                      )
-                    : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: destructive
+                      ? Theme.of(context).colorScheme.error
+                      : null,
+                  minimumSize: Size.zero,
+                ),
                 onPressed: () => Navigator.pop(context, true),
                 child: Text(actionLabel),
               ),

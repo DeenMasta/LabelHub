@@ -1,7 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/core/database/app_database.dart';
-import 'package:labelhub/core/printing/label_printer.dart';
 import 'package:labelhub/features/printing/data/printer_profile_repository.dart';
 
 void main() {
@@ -15,38 +14,8 @@ void main() {
 
   tearDown(() => database.close());
 
-  test(
-    'stores a named network printer profile for direct TSPL printing',
-    () async {
-      await repository.saveNetwork(
-        id: 'warehouse-zywell',
-        name: 'Warehouse ZYWELL',
-        host: '192.168.1.25',
-        port: 9100,
-      );
-
-      final profiles = await repository.list();
-
-      expect(profiles, hasLength(1));
-      expect(profiles.single.name, 'Warehouse ZYWELL');
-      expect(profiles.single.toDevice().id, 'network:192.168.1.25:9100');
-    },
-  );
-
-  test('rejects an invalid TCP port', () async {
-    await expectLater(
-      repository.saveNetwork(
-        id: 'invalid-port',
-        name: 'Invalid printer',
-        host: 'printer.local',
-        port: 70000,
-      ),
-      throwsA(isA<PrinterProfileException>()),
-    );
-  });
-
   test('stores a paired Bluetooth barcode printer profile', () async {
-    await repository.saveBluetooth(
+    await repository.saveProfile(
       id: 'stockroom-bluetooth',
       name: 'Stockroom label printer',
       address: 'AA:BB:CC:DD:EE:FF',
@@ -54,16 +23,26 @@ void main() {
 
     final profile = (await repository.list()).single;
 
-    expect(profile.kind, PrinterKind.bluetooth);
+    expect(profile.name, 'Stockroom label printer');
     expect(profile.toDevice().id, 'AA:BB:CC:DD:EE:FF#tspl');
   });
 
+  test('rejects an invalid Bluetooth address', () async {
+    await expectLater(
+      repository.saveProfile(
+        id: 'invalid-address',
+        name: 'Invalid printer',
+        address: 'not-an-address',
+      ),
+      throwsA(isA<PrinterProfileException>()),
+    );
+  });
+
   test('persists and clears the default printer profile', () async {
-    await repository.saveNetwork(
+    await repository.saveProfile(
       id: 'warehouse-zywell',
       name: 'Warehouse ZYWELL',
-      host: '192.168.1.30',
-      port: 9100,
+      address: 'AA:BB:CC:DD:EE:FF',
     );
 
     await repository.setDefault('warehouse-zywell');

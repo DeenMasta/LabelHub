@@ -1,8 +1,8 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:uuid/uuid.dart';
+
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
@@ -12,12 +12,9 @@ import '../../../core/printing/tspl_label_command_encoder.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
-import '../../labels/presentation/widgets/record_selector_card.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
-import '../data/print_job_repository.dart';
 import '../data/printer_profile_repository.dart';
-import '../domain/entities/print_job.dart';
 import '../domain/entities/printer_profile.dart';
 
 class PrintingPage extends ConsumerStatefulWidget {
@@ -41,18 +38,15 @@ class PrintingPage extends ConsumerStatefulWidget {
 }
 
 class _PrintingPageState extends ConsumerState<PrintingPage> {
-
   late final PrinterCatalog _printerCatalog;
-  final Set<String> _selectedRecordIds = <String>{};
+  final Map<String, int> _recordCopies = <String, int>{};
   List<PrinterDevice> _availablePrinters = const <PrinterDevice>[];
   List<CatalogueRecord> _records = const <CatalogueRecord>[];
-  List<PrintJob> _printJobs = const <PrintJob>[];
   Object? _loadError;
   String? _printError;
   bool _isLoading = true;
   bool _isCalibratingMedia = false;
   bool _isPrinting = false;
-  int _copies = 1;
   LabelLayout _layout = productLabelLayout;
   PrinterDevice? _selectedPrinter;
   late String _primaryFieldKey;
@@ -62,7 +56,9 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   void initState() {
     super.initState();
     _printerCatalog = widget.printerCatalog ?? PrinterCatalog();
-    _selectedRecordIds.addAll(widget.initialRecordIds);
+    for (final id in widget.initialRecordIds) {
+      _recordCopies[id] = 1;
+    }
     _layout = productLabelLayoutForId(widget.initialLayoutId);
     _primaryFieldKey = widget.initialPrimaryFieldKey;
     _secondaryFieldKey = widget.initialSecondaryFieldKey;
@@ -70,7 +66,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
   }
 
   List<CatalogueRecord> get _selectedRecords => _records
-      .where((CatalogueRecord record) => _selectedRecordIds.contains(record.id))
+      .where((CatalogueRecord record) => (_recordCopies[record.id] ?? 0) > 0)
       .toList();
 
   Future<void> _load() async {
@@ -86,14 +82,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       final printerProfiles = PrinterProfileRepository(database);
       final results = await Future.wait<Object?>(<Future<Object?>>[
         RecordRepository(database).list(),
-        PrintJobRepository(database).listRecent(),
         printerProfiles.list(),
         printerProfiles.defaultProfileId(),
       ]);
       final records = results[0]! as List<CatalogueRecord>;
-      final printJobs = results[1]! as List<PrintJob>;
-      final profiles = results[2]! as List<PrinterProfile>;
-      final defaultProfileId = results[3] as String?;
+      final profiles = results[1]! as List<PrinterProfile>;
+      final defaultProfileId = results[2] as String?;
       if (!mounted) {
         return;
       }
@@ -101,11 +95,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         _records = records
             .where((CatalogueRecord record) => !record.isArchived)
             .toList();
-        _selectedRecordIds.removeWhere(
-          (String id) =>
+        _recordCopies.removeWhere(
+          (String id, _) =>
               !_records.any((CatalogueRecord record) => record.id == id),
         );
-        _printJobs = printJobs;
         _availablePrinters = profiles
             .map((PrinterProfile profile) => profile.toDevice())
             .toList();
@@ -136,12 +129,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     }
   }
 
-  void _toggleRecord(CatalogueRecord record, bool selected) {
+  void _updateCopies(CatalogueRecord record, int copies) {
     setState(() {
-      if (selected) {
-        _selectedRecordIds.add(record.id);
+      if (copies <= 0) {
+        _recordCopies.remove(record.id);
       } else {
-        _selectedRecordIds.remove(record.id);
+        _recordCopies[record.id] = copies;
       }
       _printError = null;
     });
@@ -161,21 +154,9 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       _printError = null;
     });
 
-    String? jobId;
-    PrintJobRepository? repository;
     LabelPrinter? connectedPrinter;
     try {
-      final database = await ref.read(appDatabaseProvider.future);
-      repository = PrintJobRepository(database);
-      jobId = const Uuid().v4();
-      await repository.create(
-        id: jobId,
-        printerName: selectedPrinter.name,
-        labelLayoutId: _layout.id,
-        recordCount: records.length,
-        copies: _copies,
-      );
-      connectedPrinter = _printerCatalog.printerFor(selectedPrinter);
+      connectedPrinter = _printerCatalog.bluetoothPrinter;
       await connectedPrinter.connect(selectedPrinter);
       await _calibrateBeforePrinting(connectedPrinter, selectedPrinter);
       final result = await connectedPrinter.printLabels(
@@ -189,10 +170,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                   primaryText: _fieldValue(record, _primaryFieldKey),
                   secondaryText: _fieldValue(record, _secondaryFieldKey),
                   barcodeValue: record.barcodeValue,
+                  copies: _recordCopies[record.id] ?? 1,
                 ),
               )
               .toList(),
-          copies: _copies,
           labelWidthMm: _layout.widthMm,
           labelHeightMm: _layout.heightMm,
         ),
@@ -202,12 +183,8 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
           result.message ?? 'The printer could not complete the print job.',
         );
       }
-      await repository.markCompleted(jobId);
       await _load();
     } on Exception catch (error) {
-      if (jobId != null && repository != null) {
-        await repository.markFailed(jobId, error.toString());
-      }
       if (mounted) {
         setState(() => _printError = _errorMessage(error));
       }
@@ -217,7 +194,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         try {
           await connectedPrinter.disconnect();
         } on Exception {
-          // The print outcome has already been persisted; a best-effort socket
+          // The print outcome has already been processed; a best-effort socket
           // close must not mask it.
         }
       }
@@ -301,44 +278,40 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         else ...<Widget>[
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
-              final selector = RecordSelectorCard(
-                title: widget.initialRecordIds.isEmpty
-                    ? 'Choose labels to print'
-                    : 'Labels selected from preview',
-                description: widget.initialRecordIds.isEmpty
-                    ? 'Select the active records to include in this job.'
-                    : 'Your preview selection is ready. Change it only if needed.',
+              final selector = _RecordSelectionList(
                 records: _records,
-                selectedRecordIds: _selectedRecordIds,
-                onChanged: _toggleRecord,
+                recordCopies: _recordCopies,
+                onUpdateCopies: _updateCopies,
                 onSelectAll: () {
                   setState(() {
-                    _selectedRecordIds.addAll(
-                      _records.map((CatalogueRecord record) => record.id),
-                    );
+                    for (final record in _records) {
+                      if (!_recordCopies.containsKey(record.id) ||
+                          _recordCopies[record.id]! <= 0) {
+                        _recordCopies[record.id] = 1;
+                      }
+                    }
                     _printError = null;
                   });
                 },
                 onClearSelection: () {
                   setState(() {
-                    _selectedRecordIds.clear();
+                    _recordCopies.clear();
                     _printError = null;
                   });
                 },
               );
+              final totalLabels = _recordCopies.values.fold<int>(
+                0,
+                (sum, count) => sum + count,
+              );
               final configuration = _PrintConfigurationCard(
-                copies: _copies,
-                selectedRecordCount: _selectedRecords.length,
+                totalLabels: totalLabels,
                 hasDefaultPrinter: _selectedPrinter != null,
                 isPrinting: _isPrinting,
                 isCalibratingMedia: _isCalibratingMedia,
                 errorMessage: _printError,
-                onDecreaseCopies: _copies > 1
-                    ? () => setState(() => _copies--)
-                    : null,
-                onIncreaseCopies: () => setState(() => _copies++),
                 onManageProfiles: _managePrinterProfiles,
-                onPrint: _selectedRecordIds.isEmpty || _selectedPrinter == null
+                onPrint: _recordCopies.isEmpty || _selectedPrinter == null
                     ? null
                     : _print,
               );
@@ -361,42 +334,175 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
               );
             },
           ),
-          const SizedBox(height: 20),
-          _RecentPrintJobsCard(printJobs: _printJobs),
         ],
       ],
     );
   }
 }
 
+class _RecordSelectionList extends StatelessWidget {
+  const _RecordSelectionList({
+    required this.records,
+    required this.recordCopies,
+    required this.onUpdateCopies,
+    required this.onSelectAll,
+    required this.onClearSelection,
+  });
+
+  final List<CatalogueRecord> records;
+  final Map<String, int> recordCopies;
+  final void Function(CatalogueRecord record, int copies) onUpdateCopies;
+  final VoidCallback onSelectAll;
+  final VoidCallback onClearSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedCount = recordCopies.values.where((c) => c > 0).length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      'Choose labels to print',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$selectedCount of ${records.length}',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Set the quantity for each product you want to print.',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: onSelectAll,
+                    icon: const Icon(Icons.done_all_rounded),
+                    label: Text('Select all ${records.length}'),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: selectedCount == 0 ? null : onClearSelection,
+                    child: const Text('Clear all'),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: records.length,
+              separatorBuilder: (context, index) =>
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+              itemBuilder: (context, index) {
+                final record = records[index];
+                final copies = recordCopies[record.id] ?? 0;
+                final isSelected = copies > 0;
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  title: Text(
+                    record.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${record.reference} · ${record.barcodeValue}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).disabledColor,
+                        onPressed: isSelected
+                            ? () => onUpdateCopies(record, copies - 1)
+                            : null,
+                      ),
+                      SizedBox(
+                        width: 32,
+                        child: Text(
+                          '$copies',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        color: Theme.of(context).colorScheme.primary,
+                        onPressed: () => onUpdateCopies(record, copies + 1),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PrintConfigurationCard extends StatelessWidget {
   const _PrintConfigurationCard({
-    required this.copies,
-    required this.selectedRecordCount,
+    required this.totalLabels,
     required this.hasDefaultPrinter,
     required this.isPrinting,
     required this.isCalibratingMedia,
     required this.errorMessage,
-    required this.onDecreaseCopies,
-    required this.onIncreaseCopies,
     required this.onManageProfiles,
     required this.onPrint,
   });
 
-  final int copies;
-  final int selectedRecordCount;
+  final int totalLabels;
   final bool hasDefaultPrinter;
   final bool isPrinting;
   final bool isCalibratingMedia;
   final String? errorMessage;
-  final VoidCallback? onDecreaseCopies;
-  final VoidCallback onIncreaseCopies;
   final VoidCallback onManageProfiles;
   final VoidCallback? onPrint;
 
   @override
   Widget build(BuildContext context) {
-    final labelCount = selectedRecordCount * copies;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -404,38 +510,13 @@ class _PrintConfigurationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Copies for each product',
+              'Print Configuration',
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
-            const SizedBox(height: 4),
-            const Text('Each selected product prints this many labels.'),
-            const SizedBox(height: 8),
-            Row(
-              children: <Widget>[
-                IconButton(
-                  tooltip: 'Decrease copies',
-                  onPressed: onDecreaseCopies,
-                  icon: const Icon(Icons.remove_rounded),
-                ),
-                SizedBox(
-                  width: 56,
-                  child: Text(
-                    '$copies',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Increase copies',
-                  onPressed: onIncreaseCopies,
-                  icon: const Icon(Icons.add_rounded),
-                ),
-              ],
-            ),
+            const SizedBox(height: 12),
             if (!hasDefaultPrinter) ...<Widget>[
-              const SizedBox(height: 20),
               const Text(
                 'Set a default printer in Settings before printing labels.',
               ),
@@ -464,105 +545,16 @@ class _PrintConfigurationCard extends StatelessWidget {
                   : const Icon(Icons.print_outlined),
               label: Text(
                 isCalibratingMedia
-                    ? 'Calibrating label mediaâ€¦'
+                    ? 'Calibrating label media…'
                     : isPrinting
-                    ? 'Preparing printâ€¦'
-                    : 'Print $labelCount ${labelCount == 1 ? 'label' : 'labels'}',
+                    ? 'Preparing print…'
+                    : 'Print $totalLabels ${totalLabels == 1 ? 'label' : 'labels'}',
               ),
             ),
           ],
         ),
       ),
     );
-  }
-}
-
-
-
-class _RecentPrintJobsCard extends StatelessWidget {
-  const _RecentPrintJobsCard({required this.printJobs});
-
-  final List<PrintJob> printJobs;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Recent print jobs',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            if (printJobs.isEmpty)
-              const Text(
-                'No label PDFs have been sent to the print system yet.',
-              )
-            else
-              for (final job in printJobs) ...<Widget>[
-                _PrintJobRow(job: job),
-                if (job != printJobs.last) const Divider(height: 24),
-              ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PrintJobRow extends StatelessWidget {
-  const _PrintJobRow({required this.job});
-
-  final PrintJob job;
-
-  @override
-  Widget build(BuildContext context) {
-    final timestamp = job.completedAt ?? job.createdAt;
-    final statusColor = job.isCompleted || job.status == 'pending'
-        ? AppTheme.blue
-        : Theme.of(context).colorScheme.error;
-    final statusLabel = switch (job.status) {
-      'completed' => 'Sent',
-      'pending' => 'Pending',
-      _ => 'Failed',
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                '${job.labelCount} labels Â· ${job.printerName}',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            Text(
-              statusLabel,
-              style: TextStyle(color: statusColor, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${job.recordCount} records Ã— ${job.copies} copies Â· ${_formatTimestamp(timestamp)}',
-        ),
-        if (job.errorMessage != null) ...<Widget>[
-          const SizedBox(height: 4),
-          Text(job.errorMessage!, style: TextStyle(color: statusColor)),
-        ],
-      ],
-    );
-  }
-
-  String _formatTimestamp(DateTime value) {
-    final local = value.toLocal();
-    return '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 }
 

@@ -13,7 +13,7 @@ class TsplLabelCommandEncoder {
     final commands = StringBuffer();
     for (final label in request.labels) {
       _validate(label);
-      for (var copy = 0; copy < request.copies; copy++) {
+      for (var copy = 0; copy < label.copies; copy++) {
         _writeLine(
           commands,
           'SIZE ${_millimetres(request.labelWidthMm)} mm,${_millimetres(request.labelHeightMm)} mm',

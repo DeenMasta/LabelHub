@@ -1,5 +1,4 @@
 import '../../../core/database/app_database.dart';
-import '../../../core/printing/label_printer.dart';
 import '../domain/entities/printer_profile.dart';
 
 /// Owns persistence and validation for named printer destinations.
@@ -17,48 +16,13 @@ class PrinterProfileRepository {
           (DatabasePrinterProfile profile) => PrinterProfile(
             id: profile.id,
             name: profile.name,
-            kind: PrinterKind.values.byName(profile.printerKind),
             address: profile.address,
-            port: profile.port,
           ),
         )
         .toList();
   }
 
-  Future<void> saveNetwork({
-    required String id,
-    required String name,
-    required String host,
-    required int port,
-  }) async {
-    final trimmedName = name.trim();
-    final trimmedHost = host.trim();
-    if (trimmedName.isEmpty) {
-      throw const PrinterProfileException(
-        'Enter a name for the printer profile.',
-      );
-    }
-    if (trimmedHost.isEmpty) {
-      throw const PrinterProfileException(
-        'Enter the printer IP address or host name.',
-      );
-    }
-    if (port < 1 || port > 65535) {
-      throw const PrinterProfileException(
-        'Enter a network port from 1 to 65535.',
-      );
-    }
-    await _database.savePrinterProfile(
-      id: id,
-      name: trimmedName,
-      printerKind: PrinterKind.network.name,
-      printerProtocol: 'tspl',
-      address: trimmedHost,
-      port: port,
-    );
-  }
-
-  Future<void> saveBluetooth({
+  Future<void> saveProfile({
     required String id,
     required String name,
     required String address,
@@ -80,7 +44,7 @@ class PrinterProfileRepository {
     await _database.savePrinterProfile(
       id: id,
       name: trimmedName,
-      printerKind: PrinterKind.bluetooth.name,
+      printerKind: 'bluetooth',
       printerProtocol: 'tspl',
       address: trimmedAddress,
     );

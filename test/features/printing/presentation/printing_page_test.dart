@@ -44,11 +44,10 @@ void main() {
       ],
     );
     final printerProfiles = PrinterProfileRepository(database);
-    await printerProfiles.saveNetwork(
+    await printerProfiles.saveProfile(
       id: 'warehouse-zywell',
       name: 'Warehouse ZYWELL',
-      host: '192.168.1.30',
-      port: 9100,
+      address: 'AA:BB:CC:DD:EE:FF',
     );
     await printerProfiles.setDefault('warehouse-zywell');
   });
@@ -74,11 +73,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Print labels'), findsAtLeastNWidgets(1));
-    expect(find.text('Copies for each product'), findsOneWidget);
+    expect(find.text('Choose labels to print'), findsOneWidget);
     expect(
-      find.text('Each selected product prints this many labels.'),
+      find.text('Set the quantity for each product you want to print.'),
       findsOneWidget,
     );
+    expect(find.text('Print Configuration'), findsOneWidget);
     expect(find.text('Ready to print'), findsNothing);
     expect(find.text('Technical output details'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -99,7 +99,7 @@ void main() {
           theme: AppTheme.light,
           home: PrintingPage(
             initialRecordIds: const <String>['record-1'],
-            printerCatalog: PrinterCatalog(networkPrinter: printer),
+            printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
           ),
         ),
       ),

@@ -15,31 +15,22 @@ abstract interface class TsplMediaCalibratingPrinter {
 }
 
 class PrinterDevice {
-  const PrinterDevice({
-    required this.id,
-    required this.name,
-    required this.kind,
-  });
+  const PrinterDevice({required this.id, required this.name});
 
   final String id;
   final String name;
-  final PrinterKind kind;
 }
-
-enum PrinterKind { bluetooth, usb, network }
 
 class PrintRequest {
   const PrintRequest({
     required this.recordIds,
     required this.labels,
-    required this.copies,
     required this.labelWidthMm,
     required this.labelHeightMm,
   });
 
   final List<String> recordIds;
   final List<PrintLabelData> labels;
-  final int copies;
   final double labelWidthMm;
   final double labelHeightMm;
 }
@@ -50,11 +41,13 @@ class PrintLabelData {
     required this.primaryText,
     required this.secondaryText,
     required this.barcodeValue,
+    required this.copies,
   });
 
   final String primaryText;
   final String secondaryText;
   final String barcodeValue;
+  final int copies;
 }
 
 class PrintResult {

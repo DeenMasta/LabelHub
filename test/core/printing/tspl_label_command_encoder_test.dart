@@ -12,9 +12,9 @@ void main() {
         primaryText: 'Blue T-Shirt',
         secondaryText: '29.90',
         barcodeValue: barcodeValue,
+        copies: 1,
       ),
     ],
-    copies: 1,
     labelWidthMm: 40,
     labelHeightMm: 30,
   );

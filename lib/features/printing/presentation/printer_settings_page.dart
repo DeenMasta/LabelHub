@@ -11,7 +11,7 @@ import '../../../core/presentation/widgets/page_heading.dart';
 import '../data/printer_profile_repository.dart';
 import '../domain/entities/printer_profile.dart';
 
-/// Configures the direct printers that are available from the print screen.
+/// Configures the direct Bluetooth printers available from the print screen.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({this.printerCatalog, super.key});
 
@@ -25,7 +25,7 @@ class PrinterSettingsPage extends ConsumerStatefulWidget {
 class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   late final PrinterCatalog _printerCatalog;
   List<PrinterProfile> _profiles = const <PrinterProfile>[];
-  List<PrinterDevice> _pairedDevices = const <PrinterDevice>[];
+  List<PrinterDevice> _discoveredDevices = const <PrinterDevice>[];
   String? _defaultProfileId;
   String? _errorMessage;
   bool _isLoading = true;
@@ -65,19 +65,20 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     }
   }
 
-  Future<void> _findPairedDevices() async {
+  Future<void> _findPrinters() async {
     setState(() {
       _isDiscovering = true;
       _errorMessage = null;
+      _discoveredDevices = const <PrinterDevice>[];
     });
     try {
       final devices = await _printerCatalog.discoverBluetooth();
       if (mounted) {
         setState(() {
-          _pairedDevices = devices;
+          _discoveredDevices = devices;
           if (devices.isEmpty) {
             _errorMessage =
-                'No paired Bluetooth printers were found. Pair the printer in Android settings, then try again.';
+                'No paired Bluetooth printers were found. Pair your printer in Android Settings first, then try again.';
           }
         });
       }
@@ -92,69 +93,46 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     }
   }
 
-  Future<void> _saveBluetoothProfile(PrinterDevice device) async {
+  Future<void> _saveProfile(PrinterDevice device) async {
     final database = await ref.read(appDatabaseProvider.future);
     final repository = PrinterProfileRepository(database);
+
+    // Check if it already exists to avoid duplicates
+    final existingIndex = _profiles.indexWhere(
+      (p) => p.address == device.id.split('#').first,
+    );
+
+    if (existingIndex >= 0) {
+      // It exists, just make it default
+      await repository.setDefault(_profiles[existingIndex].id);
+      if (mounted) {
+        setState(() {
+          _defaultProfileId = _profiles[existingIndex].id;
+          _discoveredDevices =
+              const <PrinterDevice>[]; // clear scan list on success
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${device.name} is now the default printer.')),
+        );
+      }
+      return;
+    }
+
     final profile = PrinterProfile(
       id: const Uuid().v4(),
       name: device.name,
-      kind: PrinterKind.bluetooth,
       address: device.id.split('#').first,
     );
     try {
-      await repository.saveBluetooth(
+      await repository.saveProfile(
         id: profile.id,
         name: profile.name,
         address: profile.address,
       );
-      final isFirstProfile = _defaultProfileId == null;
-      if (isFirstProfile) {
-        await repository.setDefault(profile.id);
-      }
-      if (mounted) {
-        setState(() {
-          _profiles = <PrinterProfile>[..._profiles, profile]
-            ..sort(
-              (PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name),
-            );
-          _errorMessage = null;
-          if (isFirstProfile) {
-            _defaultProfileId = profile.id;
-          }
-        });
-      }
-    } on PrinterProfileException catch (error) {
-      if (mounted) {
-        setState(() => _errorMessage = error.message);
-      }
-    }
-  }
 
-  Future<void> _saveNetworkProfile({
-    required String name,
-    required String host,
-    required int port,
-  }) async {
-    final database = await ref.read(appDatabaseProvider.future);
-    final repository = PrinterProfileRepository(database);
-    final profile = PrinterProfile(
-      id: const Uuid().v4(),
-      name: name.trim(),
-      kind: PrinterKind.network,
-      address: host.trim(),
-      port: port,
-    );
-    try {
-      await repository.saveNetwork(
-        id: profile.id,
-        name: profile.name,
-        host: profile.address,
-        port: port,
-      );
-      final isFirstProfile = _defaultProfileId == null;
-      if (isFirstProfile) {
-        await repository.setDefault(profile.id);
-      }
+      // Automatically make the newly added printer the default
+      await repository.setDefault(profile.id);
+
       if (mounted) {
         setState(() {
           _profiles = <PrinterProfile>[..._profiles, profile]
@@ -162,16 +140,18 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
               (PrinterProfile a, PrinterProfile b) => a.name.compareTo(b.name),
             );
           _errorMessage = null;
-          if (isFirstProfile) {
-            _defaultProfileId = profile.id;
-          }
+          _defaultProfileId = profile.id;
+          _discoveredDevices =
+              const <PrinterDevice>[]; // clear scan list on success
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Printer connected successfully.')),
+        );
       }
     } on PrinterProfileException catch (error) {
       if (mounted) {
         setState(() => _errorMessage = error.message);
       }
-      rethrow;
     }
   }
 
@@ -199,20 +179,22 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   }
 
   bool _isSaved(PrinterDevice device) => _profiles.any(
-    (PrinterProfile profile) =>
-        profile.kind == PrinterKind.bluetooth &&
-        profile.address == device.id.split('#').first,
+    (PrinterProfile profile) => profile.address == device.id.split('#').first,
   );
 
   @override
   Widget build(BuildContext context) {
+    final defaultProfile = _profiles
+        .where((p) => p.id == _defaultProfileId)
+        .firstOrNull;
+
     return AppPageContent(
       children: <Widget>[
         const PageHeading(
           eyebrow: 'Hardware',
-          title: 'Printer settings',
+          title: 'Printer connection',
           description:
-              'Save paired barcode printers once, then select them from Print labels whenever you need them.',
+              'Pair your Bluetooth label printer in Android settings, then connect it here for offline printing.',
         ),
         const SizedBox(height: 20),
         OutlinedButton.icon(
@@ -226,354 +208,396 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
           icon: const Icon(Icons.print_outlined),
           label: const Text('Back to print labels'),
         ),
-        const SizedBox(height: 20),
-        _NetworkPrinterSetupCard(onSave: _saveNetworkProfile),
-        const SizedBox(height: 20),
-        _PairedBluetoothPrintersCard(
-          devices: _pairedDevices,
-          isDiscovering: _isDiscovering,
-          isSaved: _isSaved,
-          onFind: _findPairedDevices,
-          onSave: _saveBluetoothProfile,
-        ),
-        const SizedBox(height: 20),
-        _SavedPrinterProfilesCard(
-          profiles: _profiles,
-          defaultProfileId: _defaultProfileId,
+        const SizedBox(height: 24),
+
+        // Active Printer Status Card (SaaS Hero Card)
+        _ActivePrinterCard(
+          defaultProfile: defaultProfile,
           isLoading: _isLoading,
-          onSetDefault: _setDefaultProfile,
-          onDelete: _deleteProfile,
         ),
+
+        const SizedBox(height: 24),
+
+        // Setup / Discover Area
+        _PrinterDiscoverySection(
+          isDiscovering: _isDiscovering,
+          discoveredDevices: _discoveredDevices,
+          onScan: _findPrinters,
+          onConnect: _saveProfile,
+          isSaved: _isSaved,
+        ),
+
+        if (_profiles.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 24),
+          _SavedPrintersSection(
+            profiles: _profiles,
+            defaultProfileId: _defaultProfileId,
+            onSetDefault: _setDefaultProfile,
+            onDelete: _deleteProfile,
+          ),
+        ],
+
         if (_errorMessage != null) ...<Widget>[
           const SizedBox(height: 16),
-          _PrinterSettingsError(message: _errorMessage!),
+          _ErrorMessage(message: _errorMessage!),
         ],
       ],
     );
   }
 
-  String _messageFor(Object error) => switch (error) {
-    PrinterProfileException exception => exception.message,
-    _
-        when error.toString().toLowerCase().contains('bluetooth_scan') ||
-            error.toString().toLowerCase().contains('bluetooth_connect') ||
-            error.toString().toLowerCase().contains(
-              'nearby devices permission',
-            ) =>
-      'Allow Nearby devices permission to find paired Bluetooth printers, then try again.',
-    _ =>
-      'Bluetooth printers could not be checked. Confirm Bluetooth permission, then try again.',
-  };
-}
-
-class _NetworkPrinterSetupCard extends StatelessWidget {
-  const _NetworkPrinterSetupCard({required this.onSave});
-
-  final Future<void> Function({
-    required String name,
-    required String host,
-    required int port,
-  })
-  onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Network printer',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Save a printer on your local network for direct offline printing.',
-            ),
-            const SizedBox(height: 16),
-            const Text('ZYWELL ZY909 label printers use TSPL.'),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => _showAddNetworkPrinterDialog(context),
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('Add network printer'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showAddNetworkPrinterDialog(BuildContext context) async {
-    final nameController = TextEditingController();
-    final hostController = TextEditingController();
-    final portController = TextEditingController(text: '9100');
-    String? errorMessage;
-    var isSaving = false;
-    var hasSaved = false;
-
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setDialogState) {
-            return AlertDialog(
-              title: const Text('Add network printer'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    TextField(
-                      controller: nameController,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Printer name',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: hostController,
-                      keyboardType: TextInputType.url,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'IP address or host name',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: portController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'TCP port'),
-                    ),
-                    if (errorMessage != null) ...<Widget>[
-                      const SizedBox(height: 12),
-                      Text(
-                        errorMessage!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          final port = int.tryParse(portController.text.trim());
-                          if (port == null) {
-                            setDialogState(
-                              () => errorMessage = 'Enter a valid TCP port.',
-                            );
-                            return;
-                          }
-                          setDialogState(() {
-                            isSaving = true;
-                            errorMessage = null;
-                          });
-                          try {
-                            await onSave(
-                              name: nameController.text,
-                              host: hostController.text,
-                              port: port,
-                            );
-                            if (context.mounted) {
-                              hasSaved = true;
-                              Navigator.pop(context);
-                            }
-                          } on PrinterProfileException catch (error) {
-                            setDialogState(() => errorMessage = error.message);
-                          } finally {
-                            if (!hasSaved && context.mounted) {
-                              setDialogState(() => isSaving = false);
-                            }
-                          }
-                        },
-                  child: Text(isSaving ? 'Saving...' : 'Save profile'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+  String _messageFor(Object error) {
+    final msg = error.toString().toLowerCase();
+    if (msg.contains('bluetooth_scan') ||
+        msg.contains('bluetooth_connect') ||
+        msg.contains('nearby devices permission')) {
+      return 'Allow Nearby devices permission to find paired Bluetooth printers, then try again.';
+    }
+    return 'Bluetooth printers could not be checked. Confirm Bluetooth permission, then try again.';
   }
 }
 
-class _PairedBluetoothPrintersCard extends StatelessWidget {
-  const _PairedBluetoothPrintersCard({
-    required this.devices,
-    required this.isDiscovering,
-    required this.isSaved,
-    required this.onFind,
-    required this.onSave,
+class _ActivePrinterCard extends StatelessWidget {
+  const _ActivePrinterCard({
+    required this.defaultProfile,
+    required this.isLoading,
   });
 
-  final List<PrinterDevice> devices;
-  final bool isDiscovering;
-  final bool Function(PrinterDevice device) isSaved;
-  final VoidCallback onFind;
-  final ValueChanged<PrinterDevice> onSave;
+  final PrinterProfile? defaultProfile;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isConnected = defaultProfile != null;
+
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: isConnected
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          width: 2,
+        ),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              'Paired Bluetooth printers',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'LabelHub only shows devices already paired in Android settings.',
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: isDiscovering ? null : onFind,
-              icon: isDiscovering
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.bluetooth_searching_rounded),
-              label: Text(
-                isDiscovering
-                    ? 'Checking paired printers…'
-                    : 'Find paired printers',
-              ),
-            ),
-            if (devices.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 16),
-              for (final device in devices) ...<Widget>[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.bluetooth_rounded),
-                  title: Text(device.name),
-                  subtitle: Text(_protocolDescription(device)),
-                  trailing: isSaved(device)
-                      ? const Chip(label: Text('Saved'))
-                      : FilledButton(
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(76, 48),
-                          ),
-                          onPressed: () => onSave(device),
-                          child: const Text('Save'),
-                        ),
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isConnected
+                        ? theme.colorScheme.primaryContainer
+                        : theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    isConnected
+                        ? Icons.print_rounded
+                        : Icons.print_disabled_rounded,
+                    color: isConnected
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                if (device != devices.last) const Divider(height: 16),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Active printer',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      if (isLoading)
+                        const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else if (isConnected)
+                        Text(
+                          defaultProfile!.name,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        )
+                      else
+                        Text(
+                          'No printer connected',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (isConnected)
+                  Chip(
+                    label: const Text('Ready'),
+                    backgroundColor: theme.colorScheme.primaryContainer
+                        .withValues(alpha: 0.5),
+                    side: BorderSide.none,
+                  ),
               ],
+            ),
+            if (isConnected) ...<Widget>[
+              const SizedBox(height: 16),
+              Text(
+                'Bluetooth · ${defaultProfile!.address}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ] else if (!isLoading) ...<Widget>[
+              const SizedBox(height: 16),
+              Text(
+                'Connect a printer below to start printing labels.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
           ],
         ),
       ),
     );
   }
-
-  String _protocolDescription(PrinterDevice device) => 'TSPL barcode label printer';
 }
 
-class _SavedPrinterProfilesCard extends StatelessWidget {
-  const _SavedPrinterProfilesCard({
+class _PrinterDiscoverySection extends StatelessWidget {
+  const _PrinterDiscoverySection({
+    required this.isDiscovering,
+    required this.discoveredDevices,
+    required this.onScan,
+    required this.onConnect,
+    required this.isSaved,
+  });
+
+  final bool isDiscovering;
+  final List<PrinterDevice> discoveredDevices;
+  final VoidCallback onScan;
+  final ValueChanged<PrinterDevice> onConnect;
+  final bool Function(PrinterDevice) isSaved;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Available printers',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          onPressed: isDiscovering ? null : onScan,
+          icon: isDiscovering
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.bluetooth_searching_rounded),
+          label: Text(
+            isDiscovering ? 'Scanning nearby devices...' : 'Scan for printers',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+        ),
+        if (discoveredDevices.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: discoveredDevices.asMap().entries.map((entry) {
+                final index = entry.key;
+                final device = entry.value;
+                final saved = isSaved(device);
+                return Column(
+                  children: [
+                    if (index > 0) const Divider(height: 1, indent: 56),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.bluetooth_rounded),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  device.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const Text('TSPL Printer'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          saved
+                              ? const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                )
+                              : FilledButton.tonal(
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    minimumSize: Size.zero,
+                                  ),
+                                  onPressed: () => onConnect(device),
+                                  child: const Text('Connect'),
+                                ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SavedPrintersSection extends StatelessWidget {
+  const _SavedPrintersSection({
     required this.profiles,
     required this.defaultProfileId,
-    required this.isLoading,
     required this.onSetDefault,
     required this.onDelete,
   });
 
   final List<PrinterProfile> profiles;
   final String? defaultProfileId;
-  final bool isLoading;
   final ValueChanged<PrinterProfile> onSetDefault;
   final ValueChanged<PrinterProfile> onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Saved printer profiles',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'The default printer is selected automatically for each print job.',
-            ),
-            const SizedBox(height: 12),
-            if (isLoading)
-              const Center(child: CircularProgressIndicator())
-            else if (profiles.isEmpty)
-              const Text('No printer profiles saved yet.')
-            else
-              for (final profile in profiles) ...<Widget>[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    profile.kind == PrinterKind.bluetooth
-                        ? Icons.bluetooth_rounded
-                        : Icons.print_outlined,
-                  ),
-                  title: Text(profile.name),
-                  subtitle: Text(_profileDescription(profile)),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      if (profile.id == defaultProfileId)
-                        const Chip(label: Text('Default'))
-                      else
-                        IconButton(
-                          tooltip: 'Set ${profile.name} as default',
-                          onPressed: () => onSetDefault(profile),
-                          icon: const Icon(Icons.star_outline_rounded),
-                        ),
-                      IconButton(
-                        tooltip: 'Delete ${profile.name}',
-                        onPressed: () => onDelete(profile),
-                        icon: const Icon(Icons.delete_outline_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                if (profile != profiles.last) const Divider(height: 16),
-              ],
-          ],
-        ),
-      ),
-    );
-  }
+    final theme = Theme.of(context);
 
-  String _profileDescription(PrinterProfile profile) {
-    return profile.kind == PrinterKind.bluetooth
-        ? 'TSPL · ${profile.address}'
-        : 'TSPL · ${profile.address}:${profile.port}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Saved printers',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            children: profiles.asMap().entries.map((entry) {
+              final index = entry.key;
+              final profile = entry.value;
+              final isDefault = profile.id == defaultProfileId;
+
+              return Column(
+                children: [
+                  if (index > 0) const Divider(height: 1, indent: 56),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.print_outlined,
+                          color: isDefault ? theme.colorScheme.primary : null,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                profile.name,
+                                style: TextStyle(
+                                  fontWeight: isDefault
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                              Text('Bluetooth · ${profile.address}'),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (String value) {
+                            if (value == 'set_active') onSetDefault(profile);
+                            if (value == 'remove') onDelete(profile);
+                          },
+                          itemBuilder: (BuildContext context) =>
+                              <PopupMenuEntry<String>>[
+                                if (!isDefault)
+                                  const PopupMenuItem<String>(
+                                    value: 'set_active',
+                                    child: Text('Set Active'),
+                                  ),
+                                const PopupMenuItem<String>(
+                                  value: 'remove',
+                                  child: Text('Remove Printer'),
+                                ),
+                              ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
   }
 }
 
-class _PrinterSettingsError extends StatelessWidget {
-  const _PrinterSettingsError({required this.message});
+class _ErrorMessage extends StatelessWidget {
+  const _ErrorMessage({required this.message});
 
   final String message;
 
@@ -582,7 +606,7 @@ class _PrinterSettingsError extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),

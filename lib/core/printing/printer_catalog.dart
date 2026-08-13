@@ -1,37 +1,16 @@
 import 'bluetooth_thermal_printer.dart';
 import 'label_printer.dart';
-import 'network_thermal_printer.dart';
-import 'usb_thermal_printer.dart';
 
 /// Coordinates printer adapters without exposing platform details to UI code.
 class PrinterCatalog {
-  PrinterCatalog({
-    LabelPrinter? bluetoothPrinter,
-    LabelPrinter? usbPrinter,
-    LabelPrinter? networkPrinter,
-  }) : _printers = <PrinterKind, LabelPrinter>{
-         PrinterKind.bluetooth: bluetoothPrinter ?? BluetoothThermalPrinter(),
-         PrinterKind.usb: usbPrinter ?? UsbThermalPrinter(),
-         PrinterKind.network: networkPrinter ?? NetworkThermalPrinter(),
-       };
+  PrinterCatalog({LabelPrinter? bluetoothPrinter})
+    : _bluetoothPrinter = bluetoothPrinter ?? BluetoothThermalPrinter();
 
-  final Map<PrinterKind, LabelPrinter> _printers;
+  final LabelPrinter _bluetoothPrinter;
 
   Future<List<PrinterDevice>> discoverBluetooth() {
-    return _printers[PrinterKind.bluetooth]!.discover();
+    return _bluetoothPrinter.discover();
   }
 
-  Future<List<PrinterDevice>> discoverUsb() {
-    return _printers[PrinterKind.usb]!.discover();
-  }
-
-  LabelPrinter printerFor(PrinterDevice device) {
-    final printer = _printers[device.kind];
-    if (printer == null) {
-      throw UnsupportedError(
-        'No printer adapter is available for ${device.kind}.',
-      );
-    }
-    return printer;
-  }
+  LabelPrinter get bluetoothPrinter => _bluetoothPrinter;
 }
