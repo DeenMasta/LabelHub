@@ -24,6 +24,7 @@ dependencies:
   permission_handler: ^12.0.1
   uuid: ^4.6.0
   logger: ^2.7.0
+  pdf: ^3.12.0
 
 dev_dependencies:
   flutter_test:
@@ -38,4 +39,4 @@ flutter:
 # dart run flutter_launcher_icons
 flutter_launcher_icons:
   android: true
-  image_path: assets/icon/app_icon.png
+  image_path: assets/labelHub_icon.png
