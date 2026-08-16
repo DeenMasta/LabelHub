@@ -37,6 +37,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/labelHub_banner.png
 
 # Generate Android launcher assets with:
 # dart run flutter_launcher_icons

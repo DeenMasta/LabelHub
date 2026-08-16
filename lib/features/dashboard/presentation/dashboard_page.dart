@@ -1,65 +1,256 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/theme/app_theme.dart';
+import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
+import '../../printing/data/printer_profile_repository.dart';
+import '../../printing/domain/entities/printer_profile.dart';
+import '../../records/data/record_repository.dart';
+import '../../records/domain/entities/catalogue_record.dart';
 
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
 
-  static const _screenBackground = Colors.white;
+  @override
+  ConsumerState<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends ConsumerState<DashboardPage> {
+  _DashboardSnapshot? _snapshot;
+  Object? _loadError;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadDashboard());
+  }
+
+  Future<void> _loadDashboard() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      final printerProfiles = PrinterProfileRepository(database);
+      final results = await Future.wait<Object?>(<Future<Object?>>[
+        RecordRepository(database).list(),
+        printerProfiles.list(),
+        printerProfiles.defaultProfileId(),
+      ]);
+      final records = results[0]! as List<CatalogueRecord>
+        ..sort(
+          (CatalogueRecord first, CatalogueRecord second) =>
+              second.updatedAt.compareTo(first.updatedAt),
+        );
+      final profiles = results[1]! as List<PrinterProfile>;
+      final defaultProfileId = results[2] as String?;
+      PrinterProfile? defaultPrinter;
+      for (final profile in profiles) {
+        if (profile.id == defaultProfileId) {
+          defaultPrinter = profile;
+          break;
+        }
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(
+        () => _snapshot = _DashboardSnapshot(
+          records: records,
+          defaultPrinter: defaultPrinter,
+        ),
+      );
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _loadError = error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _screenBackground,
-      child: const AppPageContent(
-        children: <Widget>[
-          _DashboardHeader(),
-          SizedBox(height: 16),
-          _DashboardTabs(),
-          SizedBox(height: 20),
-          _DashboardMetrics(),
-          SizedBox(height: 20),
-          _ChartCard(),
-          SizedBox(height: 20),
-          _LabelLayoutsPanel(),
+    return AppPageContent(
+      children: <Widget>[
+        if (_isLoading)
+          const _DashboardLoadingPanel()
+        else if (_loadError != null)
+          _DashboardLoadError(onRetry: _loadDashboard)
+        else if (_snapshot case final snapshot?) ...<Widget>[
+          _DashboardHero(snapshot: snapshot),
+          const SizedBox(height: 20),
+          _DashboardMetrics(snapshot: snapshot),
+          if (snapshot.records.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 20),
+            _RecentRecordsCard(records: snapshot.recentRecords),
+          ],
         ],
-      ),
+      ],
     );
   }
 }
 
-class _DashboardMetrics extends StatelessWidget {
-  const _DashboardMetrics();
+class _DashboardSnapshot {
+  const _DashboardSnapshot({
+    required this.records,
+    required this.defaultPrinter,
+  });
+
+  final List<CatalogueRecord> records;
+  final PrinterProfile? defaultPrinter;
+
+  List<CatalogueRecord> get recentRecords => records.take(3).toList();
+}
+
+class _DashboardHero extends StatelessWidget {
+  const _DashboardHero({required this.snapshot});
+
+  final _DashboardSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
-    const cards = <Widget>[
-      _MetricCard(
-        label: 'Print Jobs',
-        value: '12',
-        detail: 'recent',
-        icon: Icons.print_outlined,
-        tint: Color(0xFF26394B),
+    final nextStep = _nextStep;
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AppTheme.navy,
+        borderRadius: BorderRadius.all(Radius.circular(24)),
       ),
-      _MetricCard(
-        label: 'Total Printed Labels',
-        value: '6,500',
-        detail: 'all time',
-        icon: Icons.local_offer_outlined,
-        tint: Color(0xFF26394B),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'WORKSPACE',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppTheme.paleBlue,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.1,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Label operations',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              nextStep.description,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFFD3DAE2),
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: () => context.go(nextStep.path),
+              icon: Icon(nextStep.icon),
+              label: Text(nextStep.actionLabel),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.accentBlue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  _DashboardNextStep get _nextStep {
+    if (snapshot.records.isEmpty) {
+      return const _DashboardNextStep(
+        description:
+            'Import your product catalogue to make verified records available for label printing.',
+        actionLabel: 'Import products',
+        icon: Icons.file_upload_outlined,
+        path: '/imports',
+      );
+    }
+    if (snapshot.defaultPrinter == null) {
+      return const _DashboardNextStep(
+        description:
+            'Your catalogue is ready. Set a default printer to begin sending labels directly from LabelHub.',
+        actionLabel: 'Set up printer',
+        icon: Icons.settings_outlined,
+        path: '/settings/printers',
+      );
+    }
+    return _DashboardNextStep(
+      description:
+          '${snapshot.records.length} ${_productNoun(snapshot.records.length)} are ready to print with ${snapshot.defaultPrinter!.name}.',
+      actionLabel: 'Prepare labels',
+      icon: Icons.print_outlined,
+      path: '/labels',
+    );
+  }
+}
+
+class _DashboardNextStep {
+  const _DashboardNextStep({
+    required this.description,
+    required this.actionLabel,
+    required this.icon,
+    required this.path,
+  });
+
+  final String description;
+  final String actionLabel;
+  final IconData icon;
+  final String path;
+}
+
+class _DashboardMetrics extends StatelessWidget {
+  const _DashboardMetrics({required this.snapshot});
+
+  final _DashboardSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = <Widget>[
+      _DashboardMetricCard(
+        label: 'Catalogue',
+        value: '${snapshot.records.length}',
+        detail:
+            '${snapshot.records.length} ${_productNoun(snapshot.records.length)} ready to label',
+      ),
+      _DashboardMetricCard(
+        label: 'Default printer',
+        value: snapshot.defaultPrinter?.name ?? 'Not configured',
+        detail: snapshot.defaultPrinter == null
+            ? 'Set a printer before your first print run'
+            : 'Ready for direct label printing',
+        isCompactValue: snapshot.defaultPrinter != null,
       ),
     ];
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        if (constraints.maxWidth < 520) {
+        if (constraints.maxWidth < 600) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[cards[0], SizedBox(height: 12), cards[1]],
+            children: <Widget>[cards[0], const SizedBox(height: 12), cards[1]],
           );
         }
         return Row(
           children: <Widget>[
             Expanded(child: cards[0]),
-            SizedBox(width: 16),
+            const SizedBox(width: 16),
             Expanded(child: cards[1]),
           ],
         );
@@ -68,151 +259,52 @@ class _DashboardMetrics extends StatelessWidget {
   }
 }
 
-class _DashboardHeader extends StatelessWidget {
-  const _DashboardHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Print Overview',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-        ),
-        IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.search_rounded),
-          color: const Color(0xFF77807B),
-          tooltip: 'Search records',
-        ),
-      ],
-    );
-  }
-}
-
-class _DashboardTabs extends StatelessWidget {
-  const _DashboardTabs();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Row(
-      children: <Widget>[
-        _DashboardTab(label: 'Today'),
-        SizedBox(width: 26),
-        _DashboardTab(label: 'This week', selected: true),
-        SizedBox(width: 26),
-        _DashboardTab(label: 'This month'),
-      ],
-    );
-  }
-}
-
-class _DashboardTab extends StatelessWidget {
-  const _DashboardTab({required this.label, this.selected = false});
-
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: selected ? const Color(0xFF121C2A) : Colors.transparent,
-              width: 1.5,
-            ),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 5),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected
-                  ? const Color(0xFF121C2A)
-                  : const Color(0xFFA1AAA5),
-              fontSize: 12,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
+class _DashboardMetricCard extends StatelessWidget {
+  const _DashboardMetricCard({
     required this.label,
     required this.value,
     required this.detail,
-    required this.icon,
-    required this.tint,
+    this.isCompactValue = false,
   });
 
   final String label;
   final String value;
   final String detail;
-  final IconData icon;
-  final Color tint;
+  final bool isCompactValue;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF121C2A),
-        borderRadius: BorderRadius.circular(20),
-      ),
+    return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: tint,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(7),
-                child: Icon(icon, size: 18, color: Colors.white),
+            Text(
+              label.toUpperCase(),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: AppTheme.accentBlue,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Text(
               value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: Colors.white),
+              style:
+                  (isCompactValue
+                          ? Theme.of(context).textTheme.titleLarge
+                          : Theme.of(context).textTheme.headlineSmall)
+                      ?.copyWith(fontWeight: FontWeight.w800),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
               detail,
               style: Theme.of(
                 context,
-              ).textTheme.labelSmall?.copyWith(color: const Color(0xFFB1BBC4)),
+              ).textTheme.bodySmall?.copyWith(color: AppTheme.mutedInk),
             ),
           ],
         ),
@@ -221,35 +313,53 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _ChartCard extends StatelessWidget {
-  const _ChartCard();
+class _RecentRecordsCard extends StatelessWidget {
+  const _RecentRecordsCard({required this.records});
+
+  final List<CatalogueRecord> records;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-      ),
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text(
-                    'Labels Printed per Day',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Recently updated',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Latest changes in your product catalogue.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.mutedInk,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const _PeriodSelector(),
+                TextButton(
+                  onPressed: () => context.go('/records'),
+                  child: const Text('View all'),
+                ),
               ],
             ),
-            const SizedBox(height: 20),
-            const SizedBox(height: 176, child: _WeeklyBarChart()),
+            const SizedBox(height: 8),
+            for (var index = 0; index < records.length; index++) ...<Widget>[
+              _RecentRecordRow(record: records[index]),
+              if (index < records.length - 1)
+                const Divider(height: 1, color: AppTheme.border),
+            ],
           ],
         ),
       ),
@@ -257,274 +367,49 @@ class _ChartCard extends StatelessWidget {
   }
 }
 
-class _PeriodSelector extends StatelessWidget {
-  const _PeriodSelector();
+class _RecentRecordRow extends StatelessWidget {
+  const _RecentRecordRow({required this.record});
+
+  final CatalogueRecord record;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F5F4),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              'This week',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(width: 3),
-            Icon(Icons.keyboard_arrow_down_rounded, size: 17),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WeeklyBarChart extends StatelessWidget {
-  const _WeeklyBarChart();
-
-  static const _days = <String>[
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thu',
-    'Fri',
-    'Sat',
-    'Sun',
-  ];
-  static const _values = <double>[.44, .68, .53, .82, .64, .94, .58];
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: const _DashedGridPainter(),
-      child: Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: List<Widget>.generate(_days.length, (int index) {
-            return Expanded(
-              child: _ChartBar(
-                day: _days[index],
-                value: _values[index],
-                isDark: index.isOdd,
-              ),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-class _ChartBar extends StatelessWidget {
-  const _ChartBar({
-    required this.day,
-    required this.value,
-    required this.isDark,
-  });
-
-  final String day;
-  final double value;
-  final bool isDark;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        const labelHeight = 22.0;
-        final barHeight = (constraints.maxHeight - labelHeight - 6) * value;
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: <Widget>[
-            Container(
-              height: barHeight,
-              width: 18,
-              decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF121C2A)
-                    : const Color(0xFFBFDBFE),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(6),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              day,
-              style: const TextStyle(fontSize: 10, color: Color(0xFF758078)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _DashedGridPainter extends CustomPainter {
-  const _DashedGridPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFFDCE2DF)
-      ..strokeWidth = 1;
-    const dashWidth = 4.0;
-    const dashSpace = 4.0;
-
-    for (final multiplier in <double>[.2, .45, .7]) {
-      final y = size.height * multiplier;
-      for (double x = 0; x < size.width; x += dashWidth + dashSpace) {
-        canvas.drawLine(Offset(x, y), Offset(x + dashWidth, y), paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedGridPainter oldDelegate) => false;
-}
-
-class _LabelLayoutsPanel extends StatelessWidget {
-  const _LabelLayoutsPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF292D2D),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 0, 18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.only(right: 18),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'Label Layouts',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
+    return Semantics(
+      button: true,
+      label: 'Open ${record.name}',
+      child: InkWell(
+        onTap: () => context.go('/records/${record.id}'),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      record.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                  ),
-                  const _BarcodeFormatSelector(),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 170,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: const <Widget>[
-                  _LabelPreviewCard(size: '50 × 30mm', width: 136),
-                  SizedBox(width: 12),
-                  _LabelPreviewCard(size: '60 × 40mm', width: 150),
-                  SizedBox(width: 12),
-                  _LabelPreviewCard(size: '100 × 50mm', width: 176),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BarcodeFormatSelector extends StatelessWidget {
-  const _BarcodeFormatSelector();
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF3C4241),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              'Code 128',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            SizedBox(width: 3),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: Colors.white,
-              size: 17,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LabelPreviewCard extends StatelessWidget {
-  const _LabelPreviewCard({required this.size, required this.width});
-
-  final String size;
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                size,
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: Color(0xFF6B7470),
-                  fontWeight: FontWeight.w600,
+                    const SizedBox(height: 3),
+                    Text(
+                      'SKU ${record.reference} / ${_updatedLabel(record.updatedAt)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: AppTheme.mutedInk),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 10),
-              const _BarcodePlaceholder(),
-              const SizedBox(height: 8),
-              const Text(
-                'Product Name',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'SOH',
-                style: TextStyle(fontSize: 10, color: Color(0xFF727B76)),
-              ),
-              const Spacer(),
-              const Text(
-                '\$19.99',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded, color: AppTheme.mutedInk),
             ],
           ),
         ),
@@ -533,26 +418,92 @@ class _LabelPreviewCard extends StatelessWidget {
   }
 }
 
-class _BarcodePlaceholder extends StatelessWidget {
-  const _BarcodePlaceholder();
+class _DashboardLoadingPanel extends StatelessWidget {
+  const _DashboardLoadingPanel();
 
   @override
   Widget build(BuildContext context) {
-    const bars = <double>[2, 1, 1, 3, 1, 2, 1, 2, 3, 1, 1, 2, 1, 3, 1, 2, 2, 1];
-    return SizedBox(
-      height: 27,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          for (final width in bars) ...<Widget>[
-            SizedBox(
-              width: width,
-              child: const ColoredBox(color: Color(0xFF1E2421)),
-            ),
-            const SizedBox(width: 1),
-          ],
-        ],
+    return const Card(
+      child: SizedBox(
+        height: 220,
+        child: Center(child: CircularProgressIndicator()),
       ),
     );
   }
+}
+
+class _DashboardLoadError extends StatelessWidget {
+  const _DashboardLoadError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Dashboard could not be loaded',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your locally stored records have not been changed.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.mutedInk),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _productNoun(int count) => count == 1 ? 'product' : 'products';
+
+String _updatedLabel(DateTime updatedAt) {
+  final now = DateTime.now().toUtc();
+  final date = updatedAt.toUtc();
+  final difference = DateTime.utc(
+    now.year,
+    now.month,
+    now.day,
+  ).difference(DateTime.utc(date.year, date.month, date.day));
+  if (difference.inDays <= 0) {
+    return 'updated today';
+  }
+  if (difference.inDays == 1) {
+    return 'updated yesterday';
+  }
+  if (difference.inDays < 7) {
+    return 'updated ${difference.inDays} days ago';
+  }
+  const monthNames = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final year = date.year == now.year ? '' : ' ${date.year}';
+  return 'updated ${monthNames[date.month - 1]} ${date.day}$year';
 }

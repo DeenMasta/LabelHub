@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/theme/app_theme.dart';
+
 /// Shared product header used by every primary application screen.
 class AppHeader extends StatelessWidget {
   const AppHeader({this.onSettingsPressed, super.key});
@@ -10,58 +12,43 @@ class AppHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-        child: Row(
-          children: <Widget>[
-            const _BrandMark(),
-            const SizedBox(width: 9),
-            Text(
-              'LabelHub',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const Spacer(),
-            _HeaderAction(
-              icon: Icons.settings_outlined,
-              tooltip: 'Settings',
-              onPressed: onSettingsPressed,
-            ),
-            const SizedBox(width: 8),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Theme.of(context).colorScheme.secondary,
-              child: Text(
-                'LH',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                ),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: AppTheme.border)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+          child: Row(
+            children: <Widget>[
+              const _HeaderBrand(),
+              const Spacer(),
+              _HeaderAction(
+                icon: Icons.settings_outlined,
+                tooltip: 'Settings',
+                onPressed: onSettingsPressed,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _BrandMark extends StatelessWidget {
-  const _BrandMark();
+class _HeaderBrand extends StatelessWidget {
+  const _HeaderBrand();
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
-        color: Color(0xFF121C2A),
-        shape: BoxShape.circle,
-      ),
-      child: SizedBox(
-        width: 25,
-        height: 25,
-        child: Icon(Icons.bolt_rounded, color: Colors.white, size: 16),
+    return Semantics(
+      image: true,
+      label: 'LabelHub',
+      child: Image.asset(
+        'assets/labelHub_banner.png',
+        width: 120,
+        height: 35,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
@@ -80,17 +67,14 @@ class _HeaderAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onPressed,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Tooltip(message: tooltip, child: Icon(icon, size: 20)),
-        ),
+    return IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 21),
+      tooltip: tooltip,
+      color: AppTheme.navy,
+      style: IconButton.styleFrom(
+        minimumSize: const Size.square(44),
+        padding: const EdgeInsets.all(10),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 abstract final class AppTheme {
   static const navy = Color(0xFF121C2A);
   static const primary = Color(0xFF2D323D);
+  static const accentBlue = Color(0xFF2563EB);
   static const paleBlueSurface = Color(0xFFEFF6FF);
   static const paleBlue = Color(0xFFBFDBFE);
   static const charcoal = Color(0xFF292D2D);
