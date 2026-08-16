@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 
 abstract final class AppTheme {
   static const navy = Color(0xFF121C2A);
-  static const blue = Color(0xFF2563EB);
+  static const primary = Color(0xFF2D323D);
   static const paleBlueSurface = Color(0xFFEFF6FF);
   static const paleBlue = Color(0xFFBFDBFE);
   static const charcoal = Color(0xFF292D2D);
   static const canvas = Color(0xFFF7F8F6);
   static const border = Color(0xFFE1E8E4);
+  static const mutedInk = Color(0xFF5F6B65);
 
   static final ThemeData light = ThemeData(
     colorScheme: const ColorScheme.light(
-      primary: blue,
+      primary: primary,
       onPrimary: Colors.white,
       secondary: paleBlue,
       onSecondary: navy,

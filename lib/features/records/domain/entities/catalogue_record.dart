@@ -8,7 +8,6 @@ class CatalogueRecord {
     required this.values,
     required this.createdAt,
     required this.updatedAt,
-    required this.isArchived,
   });
 
   final String id;
@@ -18,17 +17,29 @@ class CatalogueRecord {
   final Map<String, String> values;
   final DateTime createdAt;
   final DateTime updatedAt;
-  final bool isArchived;
 
   String get name => values['item_name']?.trim().isNotEmpty == true
       ? values['item_name']!
       : reference;
 
+  /// The cleaned category name used consistently in record lists and filters.
+  String? get category => _cleanValue(values['category']);
+
+  /// A case-insensitive category identifier for grouping and filtering.
+  String? get categoryKey => category?.toLowerCase();
+
+  static String? _cleanValue(String? value) {
+    if (value == null) {
+      return null;
+    }
+    final cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
   CatalogueRecord copyWith({
     String? reference,
     String? barcodeValue,
     Map<String, String>? values,
-    bool? isArchived,
   }) {
     return CatalogueRecord(
       id: id,
@@ -38,7 +49,6 @@ class CatalogueRecord {
       values: values ?? this.values,
       createdAt: createdAt,
       updatedAt: updatedAt,
-      isArchived: isArchived ?? this.isArchived,
     );
   }
 }

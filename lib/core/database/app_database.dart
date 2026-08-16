@@ -78,7 +78,6 @@ class AppDatabase {
         values_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        is_archived INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY(template_id) REFERENCES templates(id),
         FOREIGN KEY(import_batch_id) REFERENCES import_batches(id)
       )
@@ -171,7 +170,7 @@ class AppDatabase {
 
   Future<Set<String>> barcodeValuesForTemplate(String templateId) async {
     final rows = await _executor.runSelect(
-      'SELECT barcode_value FROM records WHERE template_id = ? AND is_archived = 0',
+      'SELECT barcode_value FROM records WHERE template_id = ?',
       <Object?>[templateId],
     );
     return rows
@@ -182,9 +181,9 @@ class AppDatabase {
   Future<List<DatabaseRecord>> records() async {
     final rows = await _executor.runSelect('''
         SELECT id, template_id, record_reference, barcode_value, values_json,
-          created_at, updated_at, is_archived
+          created_at, updated_at
         FROM records
-        ORDER BY is_archived ASC, updated_at DESC, record_reference COLLATE NOCASE ASC
+        ORDER BY updated_at DESC, record_reference COLLATE NOCASE ASC
       ''', const <Object?>[]);
     return rows.map(DatabaseRecord.fromRow).toList();
   }
@@ -193,7 +192,7 @@ class AppDatabase {
     final rows = await _executor.runSelect(
       '''
         SELECT id, template_id, record_reference, barcode_value, values_json,
-          created_at, updated_at, is_archived
+          created_at, updated_at
         FROM records
         WHERE id = ?
       ''',
@@ -213,7 +212,7 @@ class AppDatabase {
     final rows = await _executor.runSelect(
       '''
         SELECT id FROM records
-        WHERE template_id = ? AND barcode_value = ? AND id != ? AND is_archived = 0
+        WHERE template_id = ? AND barcode_value = ? AND id != ?
         LIMIT 1
       ''',
       <Object?>[templateId, barcodeValue, recordId],
@@ -237,20 +236,6 @@ class AppDatabase {
         reference,
         barcodeValue,
         jsonEncode(values),
-        DateTime.now().toUtc().toIso8601String(),
-        id,
-      ],
-    );
-  }
-
-  Future<void> setRecordArchived({
-    required String id,
-    required bool isArchived,
-  }) {
-    return _executor.runUpdate(
-      'UPDATE records SET is_archived = ?, updated_at = ? WHERE id = ?',
-      <Object?>[
-        isArchived ? 1 : 0,
         DateTime.now().toUtc().toIso8601String(),
         id,
       ],
@@ -413,8 +398,8 @@ class AppDatabase {
           '''
             INSERT INTO records (
               id, template_id, import_batch_id, record_reference,
-              barcode_value, values_json, created_at, updated_at, is_archived
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+              barcode_value, values_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ''',
           <Object?>[
             record.id,
@@ -474,7 +459,6 @@ class DatabaseRecord {
     required this.values,
     required this.createdAt,
     required this.updatedAt,
-    required this.isArchived,
   });
 
   factory DatabaseRecord.fromRow(Map<String, Object?> row) {
@@ -490,7 +474,6 @@ class DatabaseRecord {
       ),
       createdAt: DateTime.parse(row['created_at'] as String),
       updatedAt: DateTime.parse(row['updated_at'] as String),
-      isArchived: (row['is_archived'] as int) == 1,
     );
   }
 
@@ -501,7 +484,6 @@ class DatabaseRecord {
   final Map<String, String> values;
   final DateTime createdAt;
   final DateTime updatedAt;
-  final bool isArchived;
 }
 
 /// A locally stored attempt to create and hand off a label print job.

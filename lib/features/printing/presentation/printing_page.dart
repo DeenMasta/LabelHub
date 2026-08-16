@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
-
 import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/printing/label_printer.dart';
@@ -14,12 +13,14 @@ import '../../../core/presentation/widgets/page_heading.dart';
 import '../../labels/domain/entities/label_layout.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
+import '../data/direct_label_print_service.dart';
 import '../data/printer_profile_repository.dart';
 import '../domain/entities/printer_profile.dart';
 
 class PrintingPage extends ConsumerStatefulWidget {
   const PrintingPage({
     this.initialRecordIds = const <String>[],
+    this.initialRecordCopies = const <String, int>{},
     this.initialLayoutId,
     this.initialPrimaryFieldKey = 'item_name',
     this.initialSecondaryFieldKey = 'price',
@@ -28,6 +29,7 @@ class PrintingPage extends ConsumerStatefulWidget {
   });
 
   final List<String> initialRecordIds;
+  final Map<String, int> initialRecordCopies;
   final String? initialLayoutId;
   final String initialPrimaryFieldKey;
   final String initialSecondaryFieldKey;
@@ -57,7 +59,12 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     super.initState();
     _printerCatalog = widget.printerCatalog ?? PrinterCatalog();
     for (final id in widget.initialRecordIds) {
-      _recordCopies[id] = 1;
+      _recordCopies[id] = widget.initialRecordCopies[id] ?? 1;
+    }
+    for (final entry in widget.initialRecordCopies.entries) {
+      if (entry.value > 0) {
+        _recordCopies[entry.key] = entry.value;
+      }
     }
     _layout = productLabelLayoutForId(widget.initialLayoutId);
     _primaryFieldKey = widget.initialPrimaryFieldKey;
@@ -92,9 +99,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         return;
       }
       setState(() {
-        _records = records
-            .where((CatalogueRecord record) => !record.isArchived)
-            .toList();
+        _records = records;
         _recordCopies.removeWhere(
           (String id, _) =>
               !_records.any((CatalogueRecord record) => record.id == id),
@@ -142,11 +147,10 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
 
   Future<void> _print() async {
     final records = _selectedRecords;
-    final selectedPrinter = _selectedPrinter;
     if (records.isEmpty ||
         _isPrinting ||
         _isCalibratingMedia ||
-        selectedPrinter == null) {
+        _selectedPrinter == null) {
       return;
     }
     setState(() {
@@ -154,35 +158,23 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       _printError = null;
     });
 
-    LabelPrinter? connectedPrinter;
     try {
-      connectedPrinter = _printerCatalog.bluetoothPrinter;
-      await connectedPrinter.connect(selectedPrinter);
-      await _calibrateBeforePrinting(connectedPrinter, selectedPrinter);
-      final result = await connectedPrinter.printLabels(
-        PrintRequest(
-          recordIds: records
-              .map((CatalogueRecord record) => record.id)
-              .toList(),
-          labels: records
-              .map(
-                (CatalogueRecord record) => PrintLabelData(
-                  primaryText: _fieldValue(record, _primaryFieldKey),
-                  secondaryText: _fieldValue(record, _secondaryFieldKey),
-                  barcodeValue: record.barcodeValue,
-                  copies: _recordCopies[record.id] ?? 1,
-                ),
-              )
-              .toList(),
-          labelWidthMm: _layout.widthMm,
-          labelHeightMm: _layout.heightMm,
-        ),
+      final database = await ref.read(appDatabaseProvider.future);
+      await DirectLabelPrintService(
+        printerProfiles: PrinterProfileRepository(database),
+        printerCatalog: _printerCatalog,
+      ).print(
+        records: records,
+        recordCopies: _recordCopies,
+        layout: _layout,
+        primaryFieldKey: _primaryFieldKey,
+        secondaryFieldKey: _secondaryFieldKey,
+        onCalibrationChanged: (bool isCalibrating) {
+          if (mounted) {
+            setState(() => _isCalibratingMedia = isCalibrating);
+          }
+        },
       );
-      if (!result.succeeded) {
-        throw _PrintException(
-          result.message ?? 'The printer could not complete the print job.',
-        );
-      }
       await _load();
     } on Exception catch (error) {
       if (mounted) {
@@ -190,50 +182,11 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       }
       await _load();
     } finally {
-      if (connectedPrinter != null) {
-        try {
-          await connectedPrinter.disconnect();
-        } on Exception {
-          // The print outcome has already been processed; a best-effort socket
-          // close must not mask it.
-        }
-      }
       if (mounted) {
         setState(() => _isPrinting = false);
       }
     }
   }
-
-  Future<void> _calibrateBeforePrinting(
-    LabelPrinter printer,
-    PrinterDevice selectedPrinter,
-  ) async {
-    if (printer is! TsplMediaCalibratingPrinter) {
-      return;
-    }
-    final calibratingPrinter = printer as TsplMediaCalibratingPrinter;
-    if (mounted) {
-      setState(() => _isCalibratingMedia = true);
-    }
-    try {
-      final result = await calibratingPrinter.calibrateTsplMedia(
-        widthMm: _layout.widthMm,
-        heightMm: _layout.heightMm,
-      );
-      if (!result.succeeded) {
-        throw TsplPrintingException(
-          result.message ?? 'The printer could not calibrate the label media.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isCalibratingMedia = false);
-      }
-    }
-  }
-
-  String _fieldValue(CatalogueRecord record, String fieldKey) =>
-      record.values[fieldKey]?.trim() ?? '';
 
   String _errorMessage(Object error) {
     final technicalMessage = error.toString().toLowerCase();
@@ -247,7 +200,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
       PrinterProfileException exception => exception.message,
       PlatformException exception =>
         exception.message ?? 'The selected printer could not be reached.',
-      _PrintException exception => exception.message,
+      DirectLabelPrintException exception => exception.message,
       _ => 'The labels could not be prepared for printing. Try again.',
     };
   }
@@ -452,18 +405,12 @@ class _RecordSelectionList extends StatelessWidget {
                             ? () => onUpdateCopies(record, copies - 1)
                             : null,
                       ),
-                      SizedBox(
-                        width: 32,
-                        child: Text(
-                          '$copies',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              ),
-                        ),
+                      _QuantityEditor(
+                        copies: copies,
+                        isSelected: isSelected,
+                        onChanged: (int newCopies) {
+                          onUpdateCopies(record, newCopies);
+                        },
                       ),
                       IconButton(
                         icon: const Icon(Icons.add_circle_outline),
@@ -655,12 +602,12 @@ class _NoRecordsToPrint extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Import active records before printing',
+              'Import records before printing',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             const Text(
-              'Archived records are intentionally excluded from print jobs.',
+              'Imported records are ready to select and print.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -676,8 +623,81 @@ class _NoRecordsToPrint extends StatelessWidget {
   }
 }
 
-class _PrintException implements Exception {
-  const _PrintException(this.message);
+class _QuantityEditor extends StatefulWidget {
+  const _QuantityEditor({
+    required this.copies,
+    required this.isSelected,
+    required this.onChanged,
+  });
 
-  final String message;
+  final int copies;
+  final bool isSelected;
+  final void Function(int) onChanged;
+
+  @override
+  State<_QuantityEditor> createState() => _QuantityEditorState();
+}
+
+class _QuantityEditorState extends State<_QuantityEditor> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: '${widget.copies}');
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        _submit();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(_QuantityEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.copies != oldWidget.copies &&
+        int.tryParse(_controller.text) != widget.copies) {
+      _controller.text = '${widget.copies}';
+    }
+  }
+
+  void _submit() {
+    final value = int.tryParse(_controller.text) ?? 0;
+    if (value != widget.copies) {
+      widget.onChanged(value);
+    } else {
+      _controller.text = '${widget.copies}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 48,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        onSubmitted: (_) => _submit(),
+        decoration: const InputDecoration(
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          border: UnderlineInputBorder(),
+        ),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    );
+  }
 }

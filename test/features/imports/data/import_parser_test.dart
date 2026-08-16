@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:labelhub/features/imports/data/csv_import_parser.dart';
+import 'package:labelhub/features/imports/data/import_parser.dart';
 
 void main() {
-  const parser = CsvImportParser();
+  const parser = ImportParser();
 
-  test('parses headers, quoted values, and skips blank rows', () {
-    final document = parser.parse(
+  test('CSV: parses headers, quoted values, and skips blank rows', () {
+    final document = parser.parseCsv(
       'item_code,item_name,barcode\nITEM-1,"Blue, large",123\n\n',
     );
 
@@ -15,9 +15,9 @@ void main() {
     ]);
   });
 
-  test('rejects duplicate headers', () {
+  test('CSV: rejects duplicate headers', () {
     expect(
-      () => parser.parse('item_code,item_code\nITEM-1,ITEM-1'),
+      () => parser.parseCsv('item_code,item_code\nITEM-1,ITEM-1'),
       throwsFormatException,
     );
   });

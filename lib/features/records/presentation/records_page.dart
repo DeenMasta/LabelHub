@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
@@ -16,9 +17,11 @@ class RecordsPage extends ConsumerStatefulWidget {
 }
 
 class _RecordsPageState extends ConsumerState<RecordsPage> {
+  final _searchController = SearchController();
   List<CatalogueRecord> _records = const <CatalogueRecord>[];
   String _query = '';
-  _RecordVisibility _visibility = _RecordVisibility.active;
+  String? _categoryKey;
+  _RecordSort _sort = _RecordSort.sku;
   Object? _loadError;
   bool _isLoading = true;
 
@@ -26,6 +29,12 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadRecords());
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadRecords() async {
@@ -53,111 +62,340 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
 
   List<CatalogueRecord> get _visibleRecords {
     final query = _query.trim().toLowerCase();
-    return _records.where((CatalogueRecord record) {
-      final matchesVisibility = switch (_visibility) {
-        _RecordVisibility.active => !record.isArchived,
-        _RecordVisibility.archived => record.isArchived,
-        _RecordVisibility.all => true,
-      };
-      if (!matchesVisibility || query.isEmpty) {
-        return matchesVisibility;
+    final records = _records.where((CatalogueRecord record) {
+      final matchesCategory =
+          _categoryKey == null || record.categoryKey == _categoryKey;
+      if (!matchesCategory || query.isEmpty) {
+        return matchesCategory;
       }
       return <String>[
         record.reference,
         record.barcodeValue,
         ...record.values.values,
       ].join(' ').toLowerCase().contains(query);
-    }).toList();
+    }).toList()..sort(_compareRecords);
+    return records;
+  }
+
+  List<_RecordCategory> get _categories {
+    final categories = <String, _RecordCategory>{};
+    for (final record in _records) {
+      final category = record.category;
+      final key = record.categoryKey;
+      if (category != null && key != null) {
+        categories.putIfAbsent(key, () => _RecordCategory(key, category));
+      }
+    }
+    return categories.values.toList()..sort(
+      (_RecordCategory first, _RecordCategory second) =>
+          first.label.toLowerCase().compareTo(second.label.toLowerCase()),
+    );
+  }
+
+  int _compareRecords(CatalogueRecord first, CatalogueRecord second) {
+    final comparison = switch (_sort) {
+      _RecordSort.sku => _compareText(first.reference, second.reference),
+      _RecordSort.name => _compareText(first.name, second.name),
+      _RecordSort.category => _compareText(
+        first.category ?? '\uffff',
+        second.category ?? '\uffff',
+      ),
+      _RecordSort.lastUpdated => second.updatedAt.compareTo(first.updatedAt),
+    };
+    return comparison != 0 ? comparison : first.id.compareTo(second.id);
+  }
+
+  int _compareText(String first, String second) =>
+      first.toLowerCase().compareTo(second.toLowerCase());
+
+  void _resetFilters() {
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _categoryKey = null;
+      _sort = _RecordSort.sku;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final records = _visibleRecords;
-    return AppPageContent(
+    return Stack(
       children: <Widget>[
-        const PageHeading(
-          eyebrow: 'Catalogue',
-          title: 'Records',
-          description:
-              'Search, review, and maintain imported product information before printing labels.',
-        ),
-        const SizedBox(height: 20),
-        SearchBar(
-          leading: const Icon(Icons.search_rounded),
-          hintText: 'Search name, item code, or barcode',
-          onChanged: (String query) => setState(() => _query = query),
-        ),
-        const SizedBox(height: 12),
-        _RecordFilters(
-          selected: _visibility,
-          onSelected: (_RecordVisibility visibility) {
-            setState(() => _visibility = visibility);
-          },
-        ),
-        const SizedBox(height: 16),
-        if (_isLoading)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: CircularProgressIndicator(),
+        AppPageContent(
+          children: <Widget>[
+            const PageHeading(
+              eyebrow: 'Product catalogue',
+              title: 'Records',
+              description:
+                  'Find product data quickly, keep your catalogue current, and prepare records for label printing.',
             ),
-          )
-        else if (_loadError != null)
-          _RecordsLoadError(onRetry: _loadRecords)
-        else if (_records.isEmpty)
-          _EmptyRecordsPanel(onImport: () => context.go('/imports'))
-        else if (records.isEmpty)
-          _NoMatchingRecords(
-            query: _query,
-            onClear: () => setState(() => _query = ''),
-          )
-        else ...<Widget>[
-          Text(
-            '${records.length} ${records.length == 1 ? 'record' : 'records'}',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: const Color(0xFF5F6B65),
-              fontWeight: FontWeight.w700,
+            const SizedBox(height: 20),
+            if (_isLoading)
+              const _RecordsLoadingPanel()
+            else if (_loadError != null)
+              _RecordsLoadError(onRetry: _loadRecords)
+            else if (_records.isEmpty)
+              const _EmptyRecordsPanel()
+            else ...<Widget>[
+              _RecordSearchCard(
+                controller: _searchController,
+                selectedCategoryKey: _categoryKey,
+                categories: _categories,
+                selectedSort: _sort,
+                onQueryChanged: (String query) =>
+                    setState(() => _query = query),
+                onCategorySelected: (String? categoryKey) {
+                  setState(() => _categoryKey = categoryKey);
+                },
+                onSortSelected: (_RecordSort sort) {
+                  setState(() => _sort = sort);
+                },
+              ),
+              const SizedBox(height: 20),
+              if (records.isEmpty)
+                _NoMatchingRecords(query: _query, onReset: _resetFilters)
+              else ...<Widget>[
+                _RecordResultsHeader(
+                  shownRecords: records.length,
+                  totalRecords: _records.length,
+                ),
+                const SizedBox(height: 12),
+                for (
+                  var index = 0;
+                  index < records.length;
+                  index++
+                ) ...<Widget>[
+                  _RecordListCard(
+                    record: records[index],
+                    onOpen: () => context.go('/records/${records[index].id}'),
+                  ),
+                  if (index < records.length - 1) const SizedBox(height: 12),
+                ],
+              ],
+            ],
+            const SizedBox(height: 72),
+          ],
+        ),
+        if (!_isLoading && _loadError == null)
+          Positioned(
+            right: 20,
+            bottom: 20,
+            child: FloatingActionButton.extended(
+              key: const Key('records-import-button'),
+              heroTag: 'records-import',
+              onPressed: () => context.go('/imports'),
+              icon: const Icon(Icons.file_upload_outlined),
+              label: const Text('Import products'),
             ),
           ),
-          const SizedBox(height: 12),
-          for (final record in records) ...<Widget>[
-            _RecordListCard(
-              record: record,
-              onOpen: () => context.go('/records/${record.id}'),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ],
       ],
     );
   }
 }
 
-enum _RecordVisibility { active, archived, all }
+enum _RecordSort { sku, name, category, lastUpdated }
 
-class _RecordFilters extends StatelessWidget {
-  const _RecordFilters({required this.selected, required this.onSelected});
+class _RecordCategory {
+  const _RecordCategory(this.key, this.label);
 
-  final _RecordVisibility selected;
-  final ValueChanged<_RecordVisibility> onSelected;
+  final String key;
+  final String label;
+}
+
+class _RecordsLoadingPanel extends StatelessWidget {
+  const _RecordsLoadingPanel();
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: <Widget>[
-        for (final visibility in _RecordVisibility.values)
-          FilterChip(
-            label: Text(switch (visibility) {
-              _RecordVisibility.active => 'Active',
-              _RecordVisibility.archived => 'Archived',
-              _RecordVisibility.all => 'All records',
-            }),
-            selected: selected == visibility,
-            onSelected: (_) => onSelected(visibility),
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    );
+  }
+}
+
+class _RecordSearchCard extends StatelessWidget {
+  const _RecordSearchCard({
+    required this.controller,
+    required this.selectedCategoryKey,
+    required this.categories,
+    required this.selectedSort,
+    required this.onQueryChanged,
+    required this.onCategorySelected,
+    required this.onSortSelected,
+  });
+
+  final SearchController controller;
+  final String? selectedCategoryKey;
+  final List<_RecordCategory> categories;
+  final _RecordSort selectedSort;
+  final ValueChanged<String> onQueryChanged;
+  final ValueChanged<String?> onCategorySelected;
+  final ValueChanged<_RecordSort> onSortSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Find, filter, and sort',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            SearchBar(
+              controller: controller,
+              leading: const Icon(Icons.search_rounded),
+              hintText: 'Search product, SKU, or barcode',
+              onChanged: onQueryChanged,
+            ),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final categoryFilter = _CategoryFilter(
+                  selectedCategoryKey: selectedCategoryKey,
+                  categories: categories,
+                  onSelected: onCategorySelected,
+                );
+                final sortSelector = _RecordSortSelector(
+                  selected: selectedSort,
+                  onSelected: onSortSelected,
+                );
+                if (constraints.maxWidth >= 520) {
+                  return Row(
+                    children: <Widget>[
+                      Expanded(child: categoryFilter),
+                      const SizedBox(width: 12),
+                      Expanded(child: sortSelector),
+                    ],
+                  );
+                }
+                return Column(
+                  children: <Widget>[
+                    categoryFilter,
+                    const SizedBox(height: 12),
+                    sortSelector,
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryFilter extends StatelessWidget {
+  const _CategoryFilter({
+    required this.selectedCategoryKey,
+    required this.categories,
+    required this.onSelected,
+  });
+
+  final String? selectedCategoryKey;
+  final List<_RecordCategory> categories;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyedSubtree(
+      key: const Key('record-category-filter'),
+      child: DropdownButtonFormField<String>(
+        key: ValueKey<String>(selectedCategoryKey ?? ''),
+        initialValue: selectedCategoryKey ?? '',
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Category',
+          prefixIcon: Icon(Icons.category_outlined),
+        ),
+        items: <DropdownMenuItem<String>>[
+          const DropdownMenuItem<String>(
+            value: '',
+            child: Text('All categories'),
           ),
-      ],
+          for (final category in categories)
+            DropdownMenuItem<String>(
+              value: category.key,
+              child: Text(category.label),
+            ),
+        ],
+        onChanged: (String? categoryKey) => onSelected(
+          categoryKey == null || categoryKey.isEmpty ? null : categoryKey,
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordSortSelector extends StatelessWidget {
+  const _RecordSortSelector({required this.selected, required this.onSelected});
+
+  final _RecordSort selected;
+  final ValueChanged<_RecordSort> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyedSubtree(
+      key: const Key('record-sort-selector'),
+      child: DropdownButtonFormField<_RecordSort>(
+        key: ValueKey<_RecordSort>(selected),
+        initialValue: selected,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'Sort by',
+          prefixIcon: Icon(Icons.sort_rounded),
+        ),
+        items: <DropdownMenuItem<_RecordSort>>[
+          for (final sort in _RecordSort.values)
+            DropdownMenuItem<_RecordSort>(
+              value: sort,
+              child: Text(switch (sort) {
+                _RecordSort.sku => 'SKU / ID',
+                _RecordSort.name => 'Name (A-Z)',
+                _RecordSort.category => 'Category (A-Z)',
+                _RecordSort.lastUpdated => 'Last updated',
+              }),
+            ),
+        ],
+        onChanged: (_RecordSort? sort) {
+          if (sort != null) {
+            onSelected(sort);
+          }
+        },
+      ),
+    );
+  }
+}
+
+class _RecordResultsHeader extends StatelessWidget {
+  const _RecordResultsHeader({
+    required this.shownRecords,
+    required this.totalRecords,
+  });
+
+  final int shownRecords;
+  final int totalRecords;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = shownRecords == 1 ? 'product' : 'products';
+    final detail = shownRecords == totalRecords
+        ? '$shownRecords $label'
+        : '$shownRecords of $totalRecords $label';
+    return Text(
+      detail,
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
     );
   }
 }
@@ -170,58 +408,61 @@ class _RecordListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final details = <Widget>[
-                Text(
-                  record.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${record.reference}  ·  ${record.barcodeValue}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF5F6B65),
-                  ),
-                ),
-              ];
-              final status = _RecordStatusBadge(isArchived: record.isArchived);
-              return constraints.maxWidth < 420
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        ...details,
-                        const SizedBox(height: 12),
-                        status,
-                      ],
-                    )
-                  : Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: details,
+    final details = _RecordDetails(record: record);
+    return Semantics(
+      button: true,
+      label: 'Open ${record.name}',
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onOpen,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                if (constraints.maxWidth < 440) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const _RecordIcon(),
+                          const SizedBox(width: 12),
+                          Expanded(child: details),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: <Widget>[
+                          const Spacer(),
+                          Text(
+                            'View details',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        status,
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right_rounded),
-                      ],
-                    );
-            },
+                          const SizedBox(width: 2),
+                          const Icon(Icons.chevron_right_rounded),
+                        ],
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const _RecordIcon(),
+                    const SizedBox(width: 12),
+                    Expanded(child: details),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right_rounded),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -229,25 +470,95 @@ class _RecordListCard extends StatelessWidget {
   }
 }
 
-class _RecordStatusBadge extends StatelessWidget {
-  const _RecordStatusBadge({required this.isArchived});
+class _RecordIcon extends StatelessWidget {
+  const _RecordIcon();
 
-  final bool isArchived;
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.paleBlueSurface,
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+      ),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Icon(Icons.inventory_2_outlined, color: AppTheme.navy),
+      ),
+    );
+  }
+}
+
+class _RecordDetails extends StatelessWidget {
+  const _RecordDetails({required this.record});
+
+  final CatalogueRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final metadata = <Widget>[
+      if (_fieldValue('category') case final category?)
+        _RecordMetadata(label: 'Category', value: category),
+      if (_fieldValue('price') case final price?)
+        _RecordMetadata(label: 'Price', value: price),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          record.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'SKU ${record.reference} · Barcode ${record.barcodeValue}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF5F6B65)),
+        ),
+        if (metadata.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: metadata),
+        ],
+      ],
+    );
+  }
+
+  String? _fieldValue(String key) {
+    if (key == 'category') {
+      return record.category;
+    }
+    final value = record.values[key]?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+}
+
+class _RecordMetadata extends StatelessWidget {
+  const _RecordMetadata({required this.label, required this.value});
+
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: isArchived ? const Color(0xFFECEFED) : const Color(0xFFEFF6FF),
-        borderRadius: BorderRadius.circular(12),
+      decoration: const BoxDecoration(
+        color: AppTheme.canvas,
+        borderRadius: BorderRadius.all(Radius.circular(999)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Text(
-          isArchived ? 'Archived' : 'Active',
+          '$label: $value',
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: const Color(0xFF121C2A),
-            fontWeight: FontWeight.w800,
+            color: AppTheme.navy,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -270,7 +581,9 @@ class _RecordsLoadError extends StatelessWidget {
           children: <Widget>[
             Text(
               'Records could not be loaded',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -290,34 +603,53 @@ class _RecordsLoadError extends StatelessWidget {
 }
 
 class _NoMatchingRecords extends StatelessWidget {
-  const _NoMatchingRecords({required this.query, required this.onClear});
+  const _NoMatchingRecords({required this.query, required this.onReset});
 
   final String query;
-  final VoidCallback onClear;
+  final VoidCallback onReset;
 
   @override
   Widget build(BuildContext context) {
+    final hasQuery = query.trim().isNotEmpty;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: <Widget>[
-            const Icon(Icons.search_off_rounded, size: 36),
-            const SizedBox(height: 12),
-            Text(
-              'No matching records',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              query.trim().isEmpty
-                  ? 'Try another filter.'
-                  : 'Try a different search term.',
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppTheme.paleBlueSurface,
+                borderRadius: BorderRadius.all(Radius.circular(12)),
+              ),
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Icon(Icons.search_off_rounded, color: AppTheme.navy),
+              ),
             ),
             const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: onClear,
-              child: const Text('Clear search'),
+            Text(
+              'No matching products',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              hasQuery
+                  ? 'Try a different product name, SKU, or barcode.'
+                  : 'Choose another category or reset the filters.',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF5F6B65)),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onReset,
+              icon: const Icon(Icons.restart_alt_rounded),
+              label: const Text('Show all records'),
             ),
           ],
         ),
@@ -327,9 +659,7 @@ class _NoMatchingRecords extends StatelessWidget {
 }
 
 class _EmptyRecordsPanel extends StatelessWidget {
-  const _EmptyRecordsPanel({required this.onImport});
-
-  final VoidCallback onImport;
+  const _EmptyRecordsPanel();
 
   @override
   Widget build(BuildContext context) {
@@ -340,16 +670,13 @@ class _EmptyRecordsPanel extends StatelessWidget {
           children: <Widget>[
             const DecoratedBox(
               decoration: BoxDecoration(
-                color: Color(0xFFBFDBFE),
+                color: AppTheme.paleBlue,
                 borderRadius: BorderRadius.all(Radius.circular(16)),
               ),
               child: SizedBox(
                 width: 56,
                 height: 56,
-                child: Icon(
-                  Icons.inventory_2_outlined,
-                  color: Color(0xFF121C2A),
-                ),
+                child: Icon(Icons.inventory_2_outlined, color: AppTheme.navy),
               ),
             ),
             const SizedBox(height: 16),
@@ -362,20 +689,11 @@ class _EmptyRecordsPanel extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Import a completed product CSV to create searchable records and prepare them for printing.',
+              'Import a CSV or XLSX product file to create searchable records and prepare them for printing.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: const Color(0xFF5F6B65),
                 height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: onImport,
-                icon: const Icon(Icons.file_upload_outlined),
-                label: const Text('Import CSV'),
               ),
             ),
           ],

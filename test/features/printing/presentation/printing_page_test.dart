@@ -120,6 +120,28 @@ void main() {
     ]);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('uses an incoming label quantity for the selected product', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((Ref ref) async => database),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const PrintingPage(
+            initialRecordCopies: <String, int>{'record-1': 3},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(FilledButton, 'Print 3 labels'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _FakeTsplPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {

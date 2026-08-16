@@ -6,6 +6,7 @@ import '../core/presentation/widgets/primary_navigation_bar.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/imports/presentation/imports_page.dart';
 import '../features/labels/presentation/labels_page.dart';
+import '../features/printing/domain/entities/print_selection.dart';
 import '../features/printing/presentation/printing_page.dart';
 import '../features/printing/presentation/printer_settings_page.dart';
 import '../features/records/presentation/records_page.dart';
@@ -34,12 +35,15 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/printing',
           builder: (_, GoRouterState state) {
-            final initialRecordIds = switch (state.extra) {
-              final List<String> ids => ids,
-              _ => const <String>[],
+            final initialRecordCopies = switch (state.extra) {
+              PrintSelection(:final recordCopies) => recordCopies,
+              final List<String> ids => <String, int>{
+                for (final id in ids) id: 1,
+              },
+              _ => const <String, int>{},
             };
             return PrintingPage(
-              initialRecordIds: initialRecordIds,
+              initialRecordCopies: initialRecordCopies,
               initialLayoutId: state.uri.queryParameters['layout'],
               initialPrimaryFieldKey:
                   state.uri.queryParameters['primaryField'] ?? 'item_name',
@@ -74,13 +78,13 @@ class _AppShell extends StatelessWidget {
       label: 'Templates',
     ),
     PrimaryNavigationDestination(
-      icon: Icons.inventory_2_outlined,
-      label: 'Records',
+      icon: Icons.file_upload_outlined,
+      label: 'Import',
     ),
     PrimaryNavigationDestination(icon: Icons.home_rounded, label: 'Dashboard'),
     PrimaryNavigationDestination(
-      icon: Icons.file_upload_outlined,
-      label: 'Import',
+      icon: Icons.inventory_2_outlined,
+      label: 'Records',
     ),
     PrimaryNavigationDestination(
       icon: Icons.local_offer_outlined,
@@ -90,9 +94,9 @@ class _AppShell extends StatelessWidget {
 
   static const _locations = <String>[
     '/templates',
-    '/records',
-    '/',
     '/imports',
+    '/',
+    '/records',
     '/labels',
   ];
 

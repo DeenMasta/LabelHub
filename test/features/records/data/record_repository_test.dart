@@ -53,7 +53,7 @@ void main() {
   tearDown(() => database.close());
 
   test(
-    'lists records and identifies another active record with the same barcode',
+    'lists records and identifies another record with the same barcode',
     () async {
       final records = await repository.list();
 
@@ -63,7 +63,7 @@ void main() {
     },
   );
 
-  test('saves edits, archives, and deletes a record', () async {
+  test('saves edits and deletes a record', () async {
     final record = (await repository.list()).first;
     final updated = record.copyWith(
       reference: 'ITEM-009',
@@ -78,9 +78,6 @@ void main() {
     await repository.save(updated);
     expect((await repository.getById(record.id))!.reference, 'ITEM-009');
     expect(await repository.hasDuplicateBarcode(updated), isFalse);
-
-    await repository.archive(updated, archived: true);
-    expect((await repository.getById(record.id))!.isArchived, isTrue);
 
     await repository.delete(updated);
     expect(await repository.getById(record.id), isNull);

@@ -11,7 +11,7 @@ import '../../../core/presentation/widgets/page_heading.dart';
 import '../../../core/validation/import_validation_service.dart';
 import '../../templates/domain/entities/import_template.dart';
 import '../../templates/presentation/active_product_template_provider.dart';
-import '../data/csv_import_parser.dart';
+import '../data/import_parser.dart';
 import '../data/import_repository.dart';
 
 class ImportsPage extends ConsumerStatefulWidget {
@@ -22,21 +22,21 @@ class ImportsPage extends ConsumerStatefulWidget {
 }
 
 class _ImportsPageState extends ConsumerState<ImportsPage> {
-  final _parser = const CsvImportParser();
+  final _parser = const ImportParser();
   final _validator = const ImportValidationService();
-  CsvImportDocument? _document;
+  ImportDocument? _document;
   ImportValidationResult? _validation;
   String? _fileName;
   Map<String, String?> _mapping = <String, String?>{};
   bool _isPicking = false;
   bool _isSaving = false;
 
-  Future<void> _chooseCsv(ImportTemplate template) async {
+  Future<void> _chooseFile(ImportTemplate template) async {
     setState(() => _isPicking = true);
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const <String>['csv'],
+        allowedExtensions: const <String>['csv', 'xlsx'],
         withData: true,
       );
       if (!mounted || result == null) {
@@ -45,22 +45,31 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
       final file = result.files.single;
       final bytes = file.bytes;
       if (bytes == null) {
-        throw const FormatException('LabelHub could not read this CSV file.');
+        throw const FormatException('LabelHub could not read this file.');
       }
-      final document = _parser.parse(utf8.decode(bytes));
+      
+      final ImportDocument document;
+      if (file.extension?.toLowerCase() == 'xlsx') {
+        document = _parser.parseExcel(bytes);
+      } else {
+        document = _parser.parseCsv(utf8.decode(bytes));
+      }
+      
       setState(() {
         _document = document;
         _fileName = file.name;
         _validation = null;
         _mapping = <String, String?>{
           for (final field in template.fields)
-            field.key: document.headers.contains(field.key) ? field.key : null,
+            field.key: document.headers.contains(field.displayName)
+                ? field.displayName
+                : (document.headers.contains(field.key) ? field.key : null),
         };
       });
     } on FormatException catch (error) {
       _showMessage(error.message);
     } on Exception catch (error) {
-      _showMessage('Could not open CSV: $error');
+      _showMessage('Could not open file: $error');
     } finally {
       if (mounted) {
         setState(() => _isPicking = false);
@@ -148,7 +157,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
           eyebrow: 'Product catalogue',
           title: 'Import data',
           description:
-              'Bring in a product CSV, check every row, then add only valid records to your catalogue.',
+              'Bring in a product spreadsheet, check every row, then add only valid records to your catalogue.',
         ),
         const SizedBox(height: 20),
         if (template == null)
@@ -164,7 +173,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _isPicking ? null : () => _chooseCsv(template),
+              onPressed: _isPicking ? null : () => _chooseFile(template),
               icon: _isPicking
                   ? const SizedBox(
                       width: 18,
@@ -173,7 +182,7 @@ class _ImportsPageState extends ConsumerState<ImportsPage> {
                     )
                   : const Icon(Icons.file_open_outlined),
               label: Text(
-                document == null ? 'Choose CSV file' : 'Choose another CSV',
+                document == null ? 'Choose spreadsheet' : 'Choose another spreadsheet',
               ),
             ),
           ),
@@ -438,7 +447,7 @@ class _ColumnMappingCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Map CSV columns',
+              'Map columns',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),

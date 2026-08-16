@@ -15,6 +15,13 @@ void main() {
 
   tearDown(() => database.close());
 
+  test('does not expose the legacy quantity field', () {
+    expect(
+      productTemplate.fields.map((field) => field.key),
+      isNot(contains('quantity')),
+    );
+  });
+
   test(
     'saves configurable required fields while retaining the barcode rule',
     () async {

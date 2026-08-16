@@ -34,10 +34,6 @@ class RecordRepository {
     );
   }
 
-  Future<void> archive(CatalogueRecord record, {required bool archived}) {
-    return _database.setRecordArchived(id: record.id, isArchived: archived);
-  }
-
   Future<void> delete(CatalogueRecord record) =>
       _database.deleteRecord(record.id);
 
@@ -50,7 +46,6 @@ class RecordRepository {
       values: record.values,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
-      isArchived: record.isArchived,
     );
   }
 }
