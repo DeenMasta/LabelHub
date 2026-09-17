@@ -421,7 +421,7 @@ class _LabelPreviewSurface extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 2.6 * pixelsPerMm,
+                    fontSize: 3 * pixelsPerMm,
                     color: AppTheme.navy,
                   ),
                 ),

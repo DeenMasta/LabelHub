@@ -24,6 +24,7 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
   _RecordSort _sort = _RecordSort.sku;
   Object? _loadError;
   bool _isLoading = true;
+  final Set<String> _selectedRecordIds = <String>{};
 
   @override
   void initState() {
@@ -114,7 +115,79 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
       _query = '';
       _categoryKey = null;
       _sort = _RecordSort.sku;
+      _selectedRecordIds.clear();
     });
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (_selectedRecordIds.contains(id)) {
+        _selectedRecordIds.remove(id);
+      } else {
+        _selectedRecordIds.add(id);
+      }
+    });
+  }
+
+  void _selectAll(List<CatalogueRecord> records) {
+    setState(() {
+      _selectedRecordIds.addAll(records.map((r) => r.id));
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedRecordIds.clear();
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    final idsToDelete = _selectedRecordIds.toList();
+    if (idsToDelete.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete selected products?'),
+        content: Text('Are you sure you want to delete ${idsToDelete.length} products? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      final recordsToDelete = _records.where((r) => idsToDelete.contains(r.id)).toList();
+      await RecordRepository(database).deleteMany(recordsToDelete);
+      
+      _selectedRecordIds.clear();
+      await _loadRecords();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete products: $error')),
+        );
+      }
+    }
   }
 
   @override
@@ -156,9 +229,24 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
               if (records.isEmpty)
                 _NoMatchingRecords(query: _query, onReset: _resetFilters)
               else ...<Widget>[
-                _RecordResultsHeader(
-                  shownRecords: records.length,
-                  totalRecords: _records.length,
+                Row(
+                  children: [
+                    Expanded(
+                      child: _RecordResultsHeader(
+                        shownRecords: records.length,
+                        totalRecords: _records.length,
+                      ),
+                    ),
+                    if (_selectedRecordIds.isNotEmpty)
+                      TextButton(
+                        onPressed: _clearSelection,
+                        child: const Text('Clear'),
+                      ),
+                    TextButton(
+                      onPressed: () => _selectAll(records),
+                      child: const Text('Select all'),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 for (
@@ -168,6 +256,8 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
                 ) ...<Widget>[
                   _RecordListCard(
                     record: records[index],
+                    isSelected: _selectedRecordIds.contains(records[index].id),
+                    onToggle: (bool? _) => _toggleSelection(records[index].id),
                     onOpen: () => context.go('/records/${records[index].id}'),
                   ),
                   if (index < records.length - 1) const SizedBox(height: 12),
@@ -181,13 +271,23 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
           Positioned(
             right: 20,
             bottom: 20,
-            child: FloatingActionButton.extended(
-              key: const Key('records-import-button'),
-              heroTag: 'records-import',
-              onPressed: () => context.go('/imports'),
-              icon: const Icon(Icons.file_upload_outlined),
-              label: const Text('Import products'),
-            ),
+            child: _selectedRecordIds.isNotEmpty
+                ? FloatingActionButton.extended(
+                    key: const Key('records-delete-button'),
+                    heroTag: 'records-delete',
+                    onPressed: _deleteSelected,
+                    backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+                    icon: const Icon(Icons.delete_outline),
+                    label: Text('Delete ${_selectedRecordIds.length}'),
+                  )
+                : FloatingActionButton.extended(
+                    key: const Key('records-import-button'),
+                    heroTag: 'records-import',
+                    onPressed: () => context.go('/imports'),
+                    icon: const Icon(Icons.file_upload_outlined),
+                    label: const Text('Import products'),
+                  ),
           ),
       ],
     );
@@ -401,9 +501,16 @@ class _RecordResultsHeader extends StatelessWidget {
 }
 
 class _RecordListCard extends StatelessWidget {
-  const _RecordListCard({required this.record, required this.onOpen});
+  const _RecordListCard({
+    required this.record,
+    required this.isSelected,
+    required this.onToggle,
+    required this.onOpen,
+  });
 
   final CatalogueRecord record;
+  final bool isSelected;
+  final ValueChanged<bool?> onToggle;
   final VoidCallback onOpen;
 
   @override
@@ -427,6 +534,10 @@ class _RecordListCard extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
+                          Checkbox(
+                            value: isSelected,
+                            onChanged: onToggle,
+                          ),
                           const _RecordIcon(),
                           const SizedBox(width: 12),
                           Expanded(child: details),
@@ -454,6 +565,10 @@ class _RecordListCard extends StatelessWidget {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
+                    Checkbox(
+                      value: isSelected,
+                      onChanged: onToggle,
+                    ),
                     const _RecordIcon(),
                     const SizedBox(width: 12),
                     Expanded(child: details),

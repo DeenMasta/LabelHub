@@ -112,7 +112,7 @@ class PdfLabelDocumentGenerator {
             _valueFor(record, secondaryFieldKey),
             maxLines: 1,
             overflow: pw.TextOverflow.clip,
-            style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(2.6)),
+            style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3)),
           ),
         ),
         pw.Positioned(

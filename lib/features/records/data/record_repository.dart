@@ -37,6 +37,12 @@ class RecordRepository {
   Future<void> delete(CatalogueRecord record) =>
       _database.deleteRecord(record.id);
 
+  Future<void> deleteMany(Iterable<CatalogueRecord> records) async {
+    for (final record in records) {
+      await _database.deleteRecord(record.id);
+    }
+  }
+
   CatalogueRecord _fromDatabase(DatabaseRecord record) {
     return CatalogueRecord(
       id: record.id,
