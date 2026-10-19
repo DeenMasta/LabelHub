@@ -21,6 +21,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.OutputStream
+import java.io.IOException
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
@@ -101,7 +102,7 @@ class MainActivity : FlutterActivity() {
                 result.success(devices)
             }
             "connect" -> {
-                if (!hasBluetoothScanPermission()) {
+                if (!hasBluetoothPermission()) {
                     result.error(
                         "bluetooth_permission_denied",
                         "Nearby devices permission has not been granted.",
@@ -233,21 +234,51 @@ class MainActivity : FlutterActivity() {
         val adapter = BluetoothAdapter.getDefaultAdapter()
             ?: throw IllegalStateException("Bluetooth is unavailable on this device.")
         adapter.cancelDiscovery()
-        val socket = adapter.getRemoteDevice(address)
-            .createRfcommSocketToServiceRecord(serialPortProfileUuid)
+        val device = adapter.getRemoteDevice(address)
+        var lastError: IOException? = null
+
+        // A number of label printers implement SPP without link-level
+        // authentication. Try the secure socket first, then the insecure
+        // variant before reporting the low-level "read failed" error.
+        val socketFactories = listOf(
+            { device.createRfcommSocketToServiceRecord(serialPortProfileUuid) },
+            { device.createInsecureRfcommSocketToServiceRecord(serialPortProfileUuid) },
+        )
+        for (createSocket in socketFactories) {
+            val socket = createSocket()
+            try {
+                connectBluetoothSocket(socket)
+                bluetoothSocket = socket
+                bluetoothOutput = socket.outputStream
+                return
+            } catch (error: IOException) {
+                lastError = error
+                try {
+                    socket.close()
+                } catch (_: IOException) {
+                    // The failed socket is already unusable.
+                }
+            }
+        }
+
+        throw IOException(
+            "Could not connect to the printer. Make sure it is paired, powered on, " +
+                "and not connected to another device. ${lastError?.message.orEmpty()}",
+        )
+    }
+
+    private fun connectBluetoothSocket(socket: BluetoothSocket) {
         val timeoutHandler = Handler(Looper.getMainLooper())
         val timeout = Runnable {
             try {
                 socket.close()
-            } catch (_: Exception) {
+            } catch (_: IOException) {
                 // Closing the blocked connection unblocks BluetoothSocket.connect().
             }
         }
         timeoutHandler.postDelayed(timeout, 12_000)
         try {
             socket.connect()
-            bluetoothSocket = socket
-            bluetoothOutput = socket.outputStream
         } finally {
             timeoutHandler.removeCallbacks(timeout)
         }
