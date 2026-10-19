@@ -1,6 +1,5 @@
 import '../../../core/printing/label_printer.dart';
 import '../../../core/printing/printer_catalog.dart';
-import '../../../core/printing/tspl_label_command_encoder.dart';
 import '../../labels/domain/entities/label_layout.dart';
 import '../../records/domain/entities/catalogue_record.dart';
 import '../domain/entities/printer_profile.dart';
@@ -20,13 +19,43 @@ class DirectLabelPrintService {
   final PrinterProfileRepository _printerProfiles;
   final PrinterCatalog _printerCatalog;
 
+  /// Measures the installed media only when the operator explicitly requests
+  /// it. Calibration feeds labels and must not run as part of every job.
+  Future<void> calibrateMedia({required LabelLayout layout}) async {
+    final selectedPrinter = await _defaultPrinter();
+    final printer = _printerCatalog.bluetoothPrinter;
+    try {
+      if (printer is! TsplMediaCalibratingPrinter) {
+        throw const DirectLabelPrintException(
+          'The selected printer does not support label media calibration.',
+        );
+      }
+      final calibratingPrinter = printer as TsplMediaCalibratingPrinter;
+      await printer.connect(selectedPrinter);
+      final result = await calibratingPrinter.calibrateTsplMedia(
+        widthMm: layout.widthMm,
+        heightMm: layout.heightMm,
+      );
+      if (!result.succeeded) {
+        throw DirectLabelPrintException(
+          result.message ?? 'The printer could not calibrate the label media.',
+        );
+      }
+    } finally {
+      try {
+        await printer.disconnect();
+      } on Exception {
+        // A best-effort socket close must not mask the calibration outcome.
+      }
+    }
+  }
+
   Future<void> print({
     required List<CatalogueRecord> records,
     required Map<String, int> recordCopies,
     required LabelLayout layout,
     required String primaryFieldKey,
     required String secondaryFieldKey,
-    void Function(bool isCalibrating)? onCalibrationChanged,
   }) async {
     if (records.isEmpty) {
       throw const DirectLabelPrintException(
@@ -39,11 +68,6 @@ class DirectLabelPrintService {
     try {
       connectedPrinter = _printerCatalog.bluetoothPrinter;
       await connectedPrinter.connect(selectedPrinter);
-      await _calibrateBeforePrinting(
-        connectedPrinter,
-        layout,
-        onCalibrationChanged,
-      );
       final result = await connectedPrinter.printLabels(
         PrintRequest(
           recordIds: records
@@ -99,31 +123,6 @@ class DirectLabelPrintService {
       );
     }
     return selectedProfile.toDevice();
-  }
-
-  Future<void> _calibrateBeforePrinting(
-    LabelPrinter printer,
-    LabelLayout layout,
-    void Function(bool isCalibrating)? onCalibrationChanged,
-  ) async {
-    if (printer is! TsplMediaCalibratingPrinter) {
-      return;
-    }
-    final calibratingPrinter = printer as TsplMediaCalibratingPrinter;
-    onCalibrationChanged?.call(true);
-    try {
-      final result = await calibratingPrinter.calibrateTsplMedia(
-        widthMm: layout.widthMm,
-        heightMm: layout.heightMm,
-      );
-      if (!result.succeeded) {
-        throw TsplPrintingException(
-          result.message ?? 'The printer could not calibrate the label media.',
-        );
-      }
-    } finally {
-      onCalibrationChanged?.call(false);
-    }
   }
 
   String _fieldValue(CatalogueRecord record, String fieldKey) =>

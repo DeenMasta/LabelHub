@@ -97,22 +97,23 @@ class PdfLabelDocumentGenerator {
           top: verticalPadding,
           left: horizontalPadding,
           right: horizontalPadding,
-          child: pw.Text(
-            _valueFor(record, primaryFieldKey),
-            maxLines: 1,
-            overflow: pw.TextOverflow.clip,
-            style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3.8)),
-          ),
-        ),
-        pw.Positioned(
-          top: verticalPadding + LabelUnits.mmToPoints(5),
-          left: horizontalPadding,
-          right: horizontalPadding,
-          child: pw.Text(
-            _valueFor(record, secondaryFieldKey),
-            maxLines: 1,
-            overflow: pw.TextOverflow.clip,
-            style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3)),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: <pw.Widget>[
+              pw.Text(
+                _valueFor(record, primaryFieldKey),
+                maxLines: 2,
+                overflow: pw.TextOverflow.clip,
+                style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3.8)),
+              ),
+              pw.SizedBox(height: LabelUnits.mmToPoints(0.5)),
+              pw.Text(
+                _valueFor(record, secondaryFieldKey),
+                maxLines: 1,
+                overflow: pw.TextOverflow.clip,
+                style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3)),
+              ),
+            ],
           ),
         ),
         pw.Positioned(

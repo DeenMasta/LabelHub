@@ -169,11 +169,6 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         layout: _layout,
         primaryFieldKey: _primaryFieldKey,
         secondaryFieldKey: _secondaryFieldKey,
-        onCalibrationChanged: (bool isCalibrating) {
-          if (mounted) {
-            setState(() => _isCalibratingMedia = isCalibrating);
-          }
-        },
       );
       await _load();
     } on Exception catch (error) {
@@ -184,6 +179,31 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     } finally {
       if (mounted) {
         setState(() => _isPrinting = false);
+      }
+    }
+  }
+
+  Future<void> _calibrateMedia() async {
+    if (_isPrinting || _isCalibratingMedia || _selectedPrinter == null) {
+      return;
+    }
+    setState(() {
+      _isCalibratingMedia = true;
+      _printError = null;
+    });
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      await DirectLabelPrintService(
+        printerProfiles: PrinterProfileRepository(database),
+        printerCatalog: _printerCatalog,
+      ).calibrateMedia(layout: _layout);
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _printError = _errorMessage(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCalibratingMedia = false);
       }
     }
   }
@@ -264,6 +284,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
                 isCalibratingMedia: _isCalibratingMedia,
                 errorMessage: _printError,
                 onManageProfiles: _managePrinterProfiles,
+                onCalibrate: _selectedPrinter == null ? null : _calibrateMedia,
                 onPrint: _recordCopies.isEmpty || _selectedPrinter == null
                     ? null
                     : _print,
@@ -437,6 +458,7 @@ class _PrintConfigurationCard extends StatelessWidget {
     required this.isCalibratingMedia,
     required this.errorMessage,
     required this.onManageProfiles,
+    required this.onCalibrate,
     required this.onPrint,
   });
 
@@ -446,6 +468,7 @@ class _PrintConfigurationCard extends StatelessWidget {
   final bool isCalibratingMedia;
   final String? errorMessage;
   final VoidCallback onManageProfiles;
+  final VoidCallback? onCalibrate;
   final VoidCallback? onPrint;
 
   @override
@@ -480,6 +503,24 @@ class _PrintConfigurationCard extends StatelessWidget {
               const SizedBox(height: 16),
               _PrintErrorPanel(message: errorMessage!),
             ],
+            if (hasDefaultPrinter) ...<Widget>[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: isPrinting || isCalibratingMedia
+                    ? null
+                    : onCalibrate,
+                icon: const Icon(Icons.straighten_outlined),
+                label: Text(
+                  isCalibratingMedia
+                      ? 'Calibrating media…'
+                      : 'Calibrate label media',
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Use after changing label rolls; calibration feeds labels.',
+              ),
+            ],
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: isPrinting || isCalibratingMedia ? null : onPrint,
@@ -491,9 +532,7 @@ class _PrintConfigurationCard extends StatelessWidget {
                     )
                   : const Icon(Icons.print_outlined),
               label: Text(
-                isCalibratingMedia
-                    ? 'Calibrating label media…'
-                    : isPrinting
+                isPrinting
                     ? 'Preparing print…'
                     : 'Print $totalLabels ${totalLabels == 1 ? 'label' : 'labels'}',
               ),

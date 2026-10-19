@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
+import '../../../core/printing/printer_catalog.dart';
+import '../../../core/printing/tspl_label_command_encoder.dart';
+import '../../labels/domain/entities/label_layout.dart';
+import '../../printing/data/direct_label_print_service.dart';
+import '../../printing/data/printer_profile_repository.dart';
 import '../data/record_repository.dart';
 import '../domain/entities/catalogue_record.dart';
 
@@ -24,6 +31,7 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
   _RecordSort _sort = _RecordSort.sku;
   Object? _loadError;
   bool _isLoading = true;
+  bool _isPrinting = false;
   final Set<String> _selectedRecordIds = <String>{};
 
   @override
@@ -190,6 +198,74 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
     }
   }
 
+  Future<void> _printSelected() async {
+    final idsToPrint = _selectedRecordIds.toList();
+    if (idsToPrint.isEmpty) return;
+
+    final recordsToPrint = _records.where((r) => idsToPrint.contains(r.id)).toList();
+
+    final recordCopies = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (context) => _BulkPrintQuantityDialog(records: recordsToPrint),
+    );
+
+    if (recordCopies == null || recordCopies.isEmpty || !mounted) return;
+
+    setState(() => _isPrinting = true);
+    
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      await DirectLabelPrintService(
+        printerProfiles: PrinterProfileRepository(database),
+        printerCatalog: PrinterCatalog(),
+      ).print(
+        records: recordsToPrint,
+        recordCopies: recordCopies,
+        layout: productLabelLayout,
+        primaryFieldKey: 'item_name',
+        secondaryFieldKey: 'price',
+      );
+      
+      final totalLabels = recordCopies.values.fold(0, (sum, val) => sum + val);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sent $totalLabels ${totalLabels == 1 ? 'label' : 'labels'} to the default printer.')),
+        );
+      }
+      
+      setState(() {
+        _selectedRecordIds.clear();
+      });
+    } on Exception catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_printErrorMessage(error))),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPrinting = false);
+      }
+    }
+  }
+
+  String _printErrorMessage(Object error) {
+    final technicalMessage = error.toString().toLowerCase();
+    if (technicalMessage.contains('bluetooth_scan') ||
+        technicalMessage.contains('bluetooth_connect') ||
+        technicalMessage.contains('nearby devices permission')) {
+      return 'Allow Nearby devices permission to use paired Bluetooth printers, then try again.';
+    }
+    return switch (error) {
+      DirectLabelPrintException exception => exception.message,
+      TsplPrintingException exception => exception.message,
+      PlatformException exception =>
+        exception.message ?? 'The default printer could not be reached.',
+      _ => 'The labels could not be prepared for printing. Try again.',
+    };
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final records = _visibleRecords;
@@ -272,14 +348,33 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
             right: 20,
             bottom: 20,
             child: _selectedRecordIds.isNotEmpty
-                ? FloatingActionButton.extended(
-                    key: const Key('records-delete-button'),
-                    heroTag: 'records-delete',
-                    onPressed: _deleteSelected,
-                    backgroundColor: Theme.of(context).colorScheme.errorContainer,
-                    foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
-                    icon: const Icon(Icons.delete_outline),
-                    label: Text('Delete ${_selectedRecordIds.length}'),
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FloatingActionButton.extended(
+                        key: const Key('records-delete-button'),
+                        heroTag: 'records-delete',
+                        onPressed: _isPrinting ? null : _deleteSelected,
+                        backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                        foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+                        icon: const Icon(Icons.delete_outline),
+                        label: Text('Delete ${_selectedRecordIds.length}'),
+                      ),
+                      const SizedBox(width: 16),
+                      FloatingActionButton.extended(
+                        key: const Key('records-print-button'),
+                        heroTag: 'records-print',
+                        onPressed: _isPrinting ? null : _printSelected,
+                        icon: _isPrinting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(LucideIcons.printer),
+                        label: Text('Print ${_selectedRecordIds.length}'),
+                      ),
+                    ],
                   )
                 : FloatingActionButton.extended(
                     key: const Key('records-import-button'),
@@ -809,6 +904,225 @@ class _EmptyRecordsPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: const Color(0xFF5F6B65),
                 height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () => context.go('/imports'),
+              icon: const Icon(Icons.file_upload_outlined),
+              label: const Text('Import products'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BulkPrintQuantityDialog extends StatefulWidget {
+  const _BulkPrintQuantityDialog({required this.records});
+
+  final List<CatalogueRecord> records;
+
+  @override
+  State<_BulkPrintQuantityDialog> createState() => _BulkPrintQuantityDialogState();
+}
+
+class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
+  final Map<String, int> _copies = {};
+  final Map<String, TextEditingController> _controllers = {};
+  String? _generalError;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final record in widget.records) {
+      _copies[record.id] = 1;
+      _controllers[record.id] = TextEditingController(text: '1');
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _setCopies(String id, int copies) {
+    setState(() {
+      _copies[id] = copies;
+      _controllers[id]?.text = '$copies';
+      _generalError = null;
+    });
+  }
+
+  void _continueToPrint() {
+    final copiesResult = <String, int>{};
+    for (final record in widget.records) {
+      final copies = int.tryParse(_controllers[record.id]?.text ?? '0');
+      if (copies == null || copies < 0) {
+        setState(() => _generalError = 'Please enter valid numbers.');
+        return;
+      }
+      if (copies > 0) {
+        copiesResult[record.id] = copies;
+      }
+    }
+    
+    if (copiesResult.isEmpty) {
+      setState(() => _generalError = 'Enter at least 1 label for one product.');
+      return;
+    }
+    
+    Navigator.pop(context, copiesResult);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Print ${widget.records.length} products',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Set label quantity for each product.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.mutedInk),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 1, color: AppTheme.border),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.all(24),
+                itemCount: widget.records.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 16),
+                itemBuilder: (context, index) {
+                  final record = widget.records[index];
+                  final currentCopies = _copies[record.id] ?? 1;
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          record.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: <Widget>[
+                          IconButton.outlined(
+                            tooltip: 'Decrease quantity',
+                            style: IconButton.styleFrom(
+                              minimumSize: const Size.square(40),
+                              maximumSize: const Size.square(40),
+                              shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                              ),
+                            ),
+                            onPressed: currentCopies > 0
+                                ? () => _setCopies(record.id, currentCopies - 1)
+                                : null,
+                            icon: const Icon(LucideIcons.minus, size: 16),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 60,
+                            child: TextFormField(
+                              controller: _controllers[record.id],
+                              keyboardType: TextInputType.number,
+                              inputFormatters: <TextInputFormatter>[
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                              decoration: const InputDecoration(
+                                contentPadding: EdgeInsets.symmetric(vertical: 8),
+                              ),
+                              onChanged: (String value) {
+                                final copies = int.tryParse(value);
+                                if (copies != null && copies >= 0) {
+                                  setState(() {
+                                    _copies[record.id] = copies;
+                                    _generalError = null;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.outlined(
+                            tooltip: 'Increase quantity',
+                            style: IconButton.styleFrom(
+                              minimumSize: const Size.square(40),
+                              maximumSize: const Size.square(40),
+                              shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                              ),
+                            ),
+                            onPressed: () => _setCopies(record.id, currentCopies + 1),
+                            icon: const Icon(LucideIcons.plus, size: 16),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            if (_generalError != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  _generalError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const Divider(height: 1, thickness: 1, color: AppTheme.border),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _continueToPrint,
+                      child: const Text('Print labels'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

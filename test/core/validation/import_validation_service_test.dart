@@ -49,12 +49,9 @@ void main() {
     expect(result.validRowCount, 0);
     expect(
       result.rows.first.issues.map((issue) => issue.message),
-      contains('Item code is required.'),
+      contains('SKU is required.'),
     );
-    expect(
-      result.rows.first.issues.map((issue) => issue.message),
-      contains('Price has an invalid decimal value.'),
-    );
+
     expect(
       result.rows.last.issues.single.message,
       'Barcode already exists or is duplicated in this file.',

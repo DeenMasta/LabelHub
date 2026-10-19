@@ -84,7 +84,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('calibrates a TSPL printer before sending labels', (
+  testWidgets('sends labels without calibrating media for every job', (
     WidgetTester tester,
   ) async {
     final printer = _FakeTsplPrinter();
@@ -112,12 +112,34 @@ void main() {
     await tester.tap(printButton);
     await tester.pumpAndSettle();
 
-    expect(printer.operations, <String>[
-      'connect',
-      'calibrate',
-      'print',
-      'disconnect',
-    ]);
+    expect(printer.operations, <String>['connect', 'print', 'disconnect']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calibrates media only when requested', (
+    WidgetTester tester,
+  ) async {
+    final printer = _FakeTsplPrinter();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((Ref ref) async => database),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: PrintingPage(
+            initialRecordIds: const <String>['record-1'],
+            printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Calibrate label media'));
+    await tester.pumpAndSettle();
+
+    expect(printer.operations, <String>['connect', 'calibrate', 'disconnect']);
     expect(tester.takeException(), isNull);
   });
 

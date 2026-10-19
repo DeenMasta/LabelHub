@@ -36,4 +36,28 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('uses the printer copy count instead of repeating label commands', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(
+        PrintRequest(
+          recordIds: const <String>['record-1'],
+          labels: const <PrintLabelData>[
+            PrintLabelData(
+              primaryText: 'Blue T-Shirt',
+              secondaryText: '29.90',
+              barcodeValue: 'ITEM-1001',
+              copies: 50,
+            ),
+          ],
+          labelWidthMm: 40,
+          labelHeightMm: 30,
+        ),
+      ),
+    );
+
+    expect(commands, endsWith('PRINT 1,50\r\n'));
+    expect(RegExp(r'PRINT ').allMatches(commands), hasLength(1));
+    expect(RegExp(r'CLS').allMatches(commands), hasLength(1));
+  });
 }
