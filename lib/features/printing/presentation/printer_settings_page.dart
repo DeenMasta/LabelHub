@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../app/active_printer_profile_provider.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/printing/label_printer.dart';
 import '../../../core/printing/printer_catalog.dart';
@@ -11,7 +12,8 @@ import '../../../core/presentation/widgets/page_heading.dart';
 import '../data/printer_profile_repository.dart';
 import '../domain/entities/printer_profile.dart';
 
-/// Configures the direct Bluetooth printers available from the print screen.
+/// Configures the direct Bluetooth and USB printers available from the print
+/// screen.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({this.printerCatalog, super.key});
 
@@ -30,6 +32,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   String? _errorMessage;
   bool _isLoading = true;
   bool _isDiscovering = false;
+  PrinterConnectionType _connectionType = PrinterConnectionType.bluetooth;
 
   @override
   void initState() {
@@ -72,13 +75,17 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
       _discoveredDevices = const <PrinterDevice>[];
     });
     try {
-      final devices = await _printerCatalog.discoverBluetooth();
+      final devices = await switch (_connectionType) {
+        PrinterConnectionType.bluetooth => _printerCatalog.discoverBluetooth(),
+        PrinterConnectionType.usb => _printerCatalog.discoverUsb(),
+      };
       if (mounted) {
         setState(() {
           _discoveredDevices = devices;
           if (devices.isEmpty) {
-            _errorMessage =
-                'No paired Bluetooth printers were found. Pair your printer in Android Settings first, then try again.';
+            _errorMessage = _connectionType == PrinterConnectionType.bluetooth
+                ? 'No paired Bluetooth printers were found. Pair your printer in Android Settings first, then try again.'
+                : 'No USB printers were found. Connect the printer with an OTG cable, then try again.';
           }
         });
       }
@@ -99,12 +106,15 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
     // Check if it already exists to avoid duplicates
     final existingIndex = _profiles.indexWhere(
-      (p) => p.address == device.id.split('#').first,
+      (p) =>
+          p.connectionType == device.connectionType &&
+          p.address == _addressFor(device),
     );
 
     if (existingIndex >= 0) {
       // It exists, just make it default
       await repository.setDefault(_profiles[existingIndex].id);
+      ref.invalidate(activePrinterProfileProvider);
       if (mounted) {
         setState(() {
           _defaultProfileId = _profiles[existingIndex].id;
@@ -121,17 +131,20 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     final profile = PrinterProfile(
       id: const Uuid().v4(),
       name: device.name,
-      address: device.id.split('#').first,
+      address: _addressFor(device),
+      connectionType: device.connectionType,
     );
     try {
       await repository.saveProfile(
         id: profile.id,
         name: profile.name,
         address: profile.address,
+        connectionType: profile.connectionType,
       );
 
       // Automatically make the newly added printer the default
       await repository.setDefault(profile.id);
+      ref.invalidate(activePrinterProfileProvider);
 
       if (mounted) {
         setState(() {
@@ -158,6 +171,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   Future<void> _deleteProfile(PrinterProfile profile) async {
     final database = await ref.read(appDatabaseProvider.future);
     await PrinterProfileRepository(database).delete(profile.id);
+    ref.invalidate(activePrinterProfileProvider);
     if (mounted) {
       setState(() {
         _profiles = _profiles
@@ -173,14 +187,22 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   Future<void> _setDefaultProfile(PrinterProfile profile) async {
     final database = await ref.read(appDatabaseProvider.future);
     await PrinterProfileRepository(database).setDefault(profile.id);
+    ref.invalidate(activePrinterProfileProvider);
     if (mounted) {
       setState(() => _defaultProfileId = profile.id);
     }
   }
 
   bool _isSaved(PrinterDevice device) => _profiles.any(
-    (PrinterProfile profile) => profile.address == device.id.split('#').first,
+    (PrinterProfile profile) =>
+        profile.connectionType == device.connectionType &&
+        profile.address == _addressFor(device),
   );
+
+  String _addressFor(PrinterDevice device) => switch (device.connectionType) {
+    PrinterConnectionType.bluetooth => device.id.split('#').first,
+    PrinterConnectionType.usb => device.id,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +216,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
           eyebrow: 'Hardware',
           title: 'Printer connection',
           description:
-              'Pair your Bluetooth label printer in Android settings, then connect it here for offline printing.',
+              'Set up a Bluetooth or USB label printer for offline printing.',
         ),
         const SizedBox(height: 20),
         OutlinedButton.icon(
@@ -218,8 +240,33 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
         const SizedBox(height: 24),
 
-        // Setup / Discover Area
+        SegmentedButton<PrinterConnectionType>(
+          segments: const <ButtonSegment<PrinterConnectionType>>[
+            ButtonSegment<PrinterConnectionType>(
+              value: PrinterConnectionType.bluetooth,
+              icon: Icon(Icons.bluetooth_rounded),
+              label: Text('Bluetooth'),
+            ),
+            ButtonSegment<PrinterConnectionType>(
+              value: PrinterConnectionType.usb,
+              icon: Icon(Icons.usb_rounded),
+              label: Text('USB'),
+            ),
+          ],
+          selected: <PrinterConnectionType>{_connectionType},
+          onSelectionChanged: _isDiscovering
+              ? null
+              : (Set<PrinterConnectionType> selected) {
+                  setState(() {
+                    _connectionType = selected.single;
+                    _discoveredDevices = const <PrinterDevice>[];
+                    _errorMessage = null;
+                  });
+                },
+        ),
+        const SizedBox(height: 16),
         _PrinterDiscoverySection(
+          connectionType: _connectionType,
           isDiscovering: _isDiscovering,
           discoveredDevices: _discoveredDevices,
           onScan: _findPrinters,
@@ -247,12 +294,20 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
   String _messageFor(Object error) {
     final msg = error.toString().toLowerCase();
+    if (msg.contains('usb_permission_denied')) {
+      return 'Allow USB access for the connected printer, then try again.';
+    }
+    if (msg.contains('usb_not_found')) {
+      return 'The USB printer was disconnected. Reconnect it, then scan again.';
+    }
     if (msg.contains('bluetooth_scan') ||
         msg.contains('bluetooth_connect') ||
         msg.contains('nearby devices permission')) {
       return 'Allow Nearby devices permission to find paired Bluetooth printers, then try again.';
     }
-    return 'Bluetooth printers could not be checked. Confirm Bluetooth permission, then try again.';
+    return _connectionType == PrinterConnectionType.bluetooth
+        ? 'Bluetooth printers could not be checked. Confirm Bluetooth permission, then try again.'
+        : 'USB printers could not be checked. Confirm the OTG cable is connected, then try again.';
   }
 }
 
@@ -268,6 +323,7 @@ class _ActivePrinterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final defaultProfile = this.defaultProfile;
     final isConnected = defaultProfile != null;
 
     return Card(
@@ -326,7 +382,7 @@ class _ActivePrinterCard extends StatelessWidget {
                         )
                       else if (isConnected)
                         Text(
-                          defaultProfile!.name,
+                          defaultProfile.name,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -354,7 +410,7 @@ class _ActivePrinterCard extends StatelessWidget {
             if (isConnected) ...<Widget>[
               const SizedBox(height: 16),
               Text(
-                'Bluetooth · ${defaultProfile!.address}',
+                '${defaultProfile.connectionType.label} · ${defaultProfile.address}',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -377,6 +433,7 @@ class _ActivePrinterCard extends StatelessWidget {
 
 class _PrinterDiscoverySection extends StatelessWidget {
   const _PrinterDiscoverySection({
+    required this.connectionType,
     required this.isDiscovering,
     required this.discoveredDevices,
     required this.onScan,
@@ -384,6 +441,7 @@ class _PrinterDiscoverySection extends StatelessWidget {
     required this.isSaved,
   });
 
+  final PrinterConnectionType connectionType;
   final bool isDiscovering;
   final List<PrinterDevice> discoveredDevices;
   final VoidCallback onScan;
@@ -398,7 +456,7 @@ class _PrinterDiscoverySection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          'Available printers',
+          'Available ${connectionType.label} printers',
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
           ),
@@ -421,9 +479,15 @@ class _PrinterDiscoverySection extends StatelessWidget {
                     color: Colors.white,
                   ),
                 )
-              : const Icon(Icons.bluetooth_searching_rounded),
+              : Icon(
+                  connectionType == PrinterConnectionType.bluetooth
+                      ? Icons.bluetooth_searching_rounded
+                      : Icons.usb_rounded,
+                ),
           label: Text(
-            isDiscovering ? 'Scanning nearby devices...' : 'Scan for printers',
+            isDiscovering
+                ? 'Checking connected printers...'
+                : 'Find ${connectionType.label} printers',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
         ),
@@ -448,7 +512,11 @@ class _PrinterDiscoverySection extends StatelessWidget {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.bluetooth_rounded),
+                          Icon(
+                            connectionType == PrinterConnectionType.bluetooth
+                                ? Icons.bluetooth_rounded
+                                : Icons.usb_rounded,
+                          ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -460,7 +528,7 @@ class _PrinterDiscoverySection extends StatelessWidget {
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                const Text('TSPL Printer'),
+                                Text('${connectionType.label} · TSPL printer'),
                               ],
                             ),
                           ),
@@ -559,7 +627,9 @@ class _SavedPrintersSection extends StatelessWidget {
                                       : FontWeight.w500,
                                 ),
                               ),
-                              Text('Bluetooth · ${profile.address}'),
+                              Text(
+                                '${profile.connectionType.label} · ${profile.address}',
+                              ),
                             ],
                           ),
                         ),

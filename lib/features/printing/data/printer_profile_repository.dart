@@ -1,4 +1,5 @@
 import '../../../core/database/app_database.dart';
+import '../../../core/printing/label_printer.dart';
 import '../domain/entities/printer_profile.dart';
 
 /// Owns persistence and validation for named printer destinations.
@@ -17,6 +18,7 @@ class PrinterProfileRepository {
             id: profile.id,
             name: profile.name,
             address: profile.address,
+            connectionType: _connectionTypeFor(profile.printerKind),
           ),
         )
         .toList();
@@ -26,6 +28,7 @@ class PrinterProfileRepository {
     required String id,
     required String name,
     required String address,
+    PrinterConnectionType connectionType = PrinterConnectionType.bluetooth,
   }) async {
     final trimmedName = name.trim();
     final trimmedAddress = address.trim();
@@ -34,17 +37,21 @@ class PrinterProfileRepository {
         'Enter a name for the printer profile.',
       );
     }
-    if (!RegExp(
-      r'^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$',
-    ).hasMatch(trimmedAddress)) {
+    if (connectionType == PrinterConnectionType.bluetooth &&
+        !RegExp(r'^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$').hasMatch(
+          trimmedAddress,
+        )) {
       throw const PrinterProfileException(
         'The paired Bluetooth printer address is invalid.',
       );
     }
+    if (connectionType == PrinterConnectionType.usb && trimmedAddress.isEmpty) {
+      throw const PrinterProfileException('The USB printer identifier is invalid.');
+    }
     await _database.savePrinterProfile(
       id: id,
       name: trimmedName,
-      printerKind: 'bluetooth',
+      printerKind: connectionType.name,
       printerProtocol: 'tspl',
       address: trimmedAddress,
     );
@@ -68,6 +75,11 @@ class PrinterProfileRepository {
       await _database.saveMetadata(key: _defaultProfileMetadataKey, value: '');
     }
   }
+
+  PrinterConnectionType _connectionTypeFor(String value) => switch (value) {
+    'usb' => PrinterConnectionType.usb,
+    _ => PrinterConnectionType.bluetooth,
+  };
 }
 
 class PrinterProfileException implements Exception {

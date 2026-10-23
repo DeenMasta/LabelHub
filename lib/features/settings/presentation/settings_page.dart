@@ -35,7 +35,7 @@ class SettingsPage extends StatelessWidget {
             subtitle: const Padding(
               padding: EdgeInsets.only(top: 4),
               child: Text(
-                'Set up Bluetooth and network printer profiles for label printing.',
+                'Set up Bluetooth and USB printer profiles for label printing.',
               ),
             ),
             trailing: const Icon(Icons.chevron_right_rounded),

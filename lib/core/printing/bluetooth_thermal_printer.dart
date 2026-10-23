@@ -13,14 +13,18 @@ class BluetoothThermalPrinter
     implements LabelPrinter, TsplMediaCalibratingPrinter {
   BluetoothThermalPrinter({
     MethodChannel channel = const MethodChannel('labelhub/bluetooth_printer'),
-  }) : _channel = channel;
+    Future<void> Function()? requestBluetoothPermission,
+  }) : _channel = channel,
+       _requestPermission =
+           requestBluetoothPermission ?? _requestBluetoothPermission;
 
   final MethodChannel _channel;
+  final Future<void> Function() _requestPermission;
   PrinterDevice? _connectedDevice;
 
   @override
   Future<List<PrinterDevice>> discover() async {
-    await _requestBluetoothPermission();
+    await _requestPermission();
     final devices = await _channel.invokeListMethod<Map<Object?, Object?>>(
       'listBondedDevices',
     );
@@ -32,7 +36,7 @@ class BluetoothThermalPrinter
 
   @override
   Future<void> connect(PrinterDevice device) async {
-    await _requestBluetoothPermission();
+    await _requestPermission();
     await _channel.invokeMethod<void>('connect', <String, Object?>{
       'address': _addressFor(device.id),
     });
@@ -86,7 +90,7 @@ class BluetoothThermalPrinter
     }
   }
 
-  Future<void> _requestBluetoothPermission() async {
+  static Future<void> _requestBluetoothPermission() async {
     if (!Platform.isAndroid) {
       throw const TsplPrintingException(
         'Bluetooth thermal printing is currently available on Android only.',

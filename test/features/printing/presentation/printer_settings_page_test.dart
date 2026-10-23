@@ -36,7 +36,8 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Printer connection'), findsOneWidget);
-    expect(find.text('Scan for printers'), findsOneWidget);
+    expect(find.text('Find Bluetooth printers'), findsOneWidget);
+    expect(find.text('USB'), findsOneWidget);
   });
 }
 

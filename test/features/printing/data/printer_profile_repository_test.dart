@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/core/database/app_database.dart';
+import 'package:labelhub/core/printing/label_printer.dart';
 import 'package:labelhub/features/printing/data/printer_profile_repository.dart';
 
 void main() {
@@ -36,6 +37,21 @@ void main() {
       ),
       throwsA(isA<PrinterProfileException>()),
     );
+  });
+
+  test('stores a USB printer profile with its USB device identifier', () async {
+    await repository.saveProfile(
+      id: 'packing-usb',
+      name: 'Packing station printer',
+      address: '/dev/bus/usb/001/004',
+      connectionType: PrinterConnectionType.usb,
+    );
+
+    final profile = (await repository.list()).single;
+
+    expect(profile.connectionType, PrinterConnectionType.usb);
+    expect(profile.toDevice().id, '/dev/bus/usb/001/004');
+    expect(profile.toDevice().connectionType, PrinterConnectionType.usb);
   });
 
   test('persists and clears the default printer profile', () async {

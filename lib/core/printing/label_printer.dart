@@ -5,6 +5,16 @@ abstract interface class LabelPrinter {
   Future<void> disconnect();
 }
 
+enum PrinterConnectionType {
+  bluetooth,
+  usb;
+
+  String get label => switch (this) {
+    PrinterConnectionType.bluetooth => 'Bluetooth',
+    PrinterConnectionType.usb => 'USB',
+  };
+}
+
 /// Optional capability for TSPL printers that can measure the currently
 /// installed label media with their gap sensor.
 abstract interface class TsplMediaCalibratingPrinter {
@@ -15,10 +25,15 @@ abstract interface class TsplMediaCalibratingPrinter {
 }
 
 class PrinterDevice {
-  const PrinterDevice({required this.id, required this.name});
+  const PrinterDevice({
+    required this.id,
+    required this.name,
+    this.connectionType = PrinterConnectionType.bluetooth,
+  });
 
   final String id;
   final String name;
+  final PrinterConnectionType connectionType;
 }
 
 class PrintRequest {

@@ -6,13 +6,23 @@ class PrinterProfile {
     required this.id,
     required this.name,
     required this.address,
+    this.connectionType = PrinterConnectionType.bluetooth,
   });
 
   final String id;
   final String name;
   final String address;
+  final PrinterConnectionType connectionType;
 
   PrinterDevice toDevice() {
-    return PrinterDevice(id: '$address#tspl', name: name);
+    final deviceId = switch (connectionType) {
+      PrinterConnectionType.bluetooth => '$address#tspl',
+      PrinterConnectionType.usb => address,
+    };
+    return PrinterDevice(
+      id: deviceId,
+      name: name,
+      connectionType: connectionType,
+    );
   }
 }

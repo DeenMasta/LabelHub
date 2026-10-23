@@ -146,7 +146,9 @@ class MainActivity : FlutterActivity() {
         val manager = getSystemService(Context.USB_SERVICE) as UsbManager
         when (call.method) {
             "listDevices" -> {
-                val devices = manager.deviceList.values.map { device ->
+                val devices = manager.deviceList.values
+                    .filter(::hasBulkOutputEndpoint)
+                    .map { device ->
                     mapOf(
                         "id" to device.deviceName,
                         "name" to "${device.manufacturerName ?: "USB"} ${device.productName ?: "printer"}",
@@ -287,12 +289,29 @@ class MainActivity : FlutterActivity() {
     private fun disconnectBluetoothPrinter() {
         try {
             bluetoothOutput?.close()
+        } catch (_: IOException) {
+            // A socket that has already dropped is safe to discard.
         } finally {
             bluetoothOutput = null
-            bluetoothSocket?.close()
-            bluetoothSocket = null
+            try {
+                bluetoothSocket?.close()
+            } catch (_: IOException) {
+                // A socket that has already dropped is safe to discard.
+            } finally {
+                bluetoothSocket = null
+            }
         }
     }
+
+    private fun hasBulkOutputEndpoint(device: UsbDevice): Boolean =
+        (0 until device.interfaceCount).any { interfaceIndex ->
+            val usbInterface = device.getInterface(interfaceIndex)
+            (0 until usbInterface.endpointCount).any { endpointIndex ->
+                val endpoint = usbInterface.getEndpoint(endpointIndex)
+                endpoint.direction == UsbConstants.USB_DIR_OUT &&
+                    endpoint.type == UsbConstants.USB_ENDPOINT_XFER_BULK
+            }
+        }
 
     private fun connectUsbPrinter(device: UsbDevice) {
         disconnectUsbPrinter()

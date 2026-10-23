@@ -22,8 +22,9 @@ class DirectLabelPrintService {
   /// Measures the installed media only when the operator explicitly requests
   /// it. Calibration feeds labels and must not run as part of every job.
   Future<void> calibrateMedia({required LabelLayout layout}) async {
-    final selectedPrinter = await _defaultPrinter();
-    final printer = _printerCatalog.bluetoothPrinter;
+    final selectedProfile = await _defaultProfile();
+    final selectedPrinter = selectedProfile.toDevice();
+    final printer = _printerCatalog.printerFor(selectedProfile.connectionType);
     try {
       if (printer is! TsplMediaCalibratingPrinter) {
         throw const DirectLabelPrintException(
@@ -63,10 +64,11 @@ class DirectLabelPrintService {
       );
     }
 
-    final selectedPrinter = await _defaultPrinter();
+    final selectedProfile = await _defaultProfile();
+    final selectedPrinter = selectedProfile.toDevice();
     LabelPrinter? connectedPrinter;
     try {
-      connectedPrinter = _printerCatalog.bluetoothPrinter;
+      connectedPrinter = _printerCatalog.printerFor(selectedProfile.connectionType);
       await connectedPrinter.connect(selectedPrinter);
       final result = await connectedPrinter.printLabels(
         PrintRequest(
@@ -103,7 +105,7 @@ class DirectLabelPrintService {
     }
   }
 
-  Future<PrinterDevice> _defaultPrinter() async {
+  Future<PrinterProfile> _defaultProfile() async {
     final results = await Future.wait<Object?>(<Future<Object?>>[
       _printerProfiles.list(),
       _printerProfiles.defaultProfileId(),
@@ -122,7 +124,7 @@ class DirectLabelPrintService {
         'Set a default printer in Settings before printing labels.',
       );
     }
-    return selectedProfile.toDevice();
+    return selectedProfile;
   }
 
   String _fieldValue(CatalogueRecord record, String fieldKey) =>

@@ -143,6 +143,49 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('sends labels to the saved USB printer profile', (
+    WidgetTester tester,
+  ) async {
+    final bluetoothPrinter = _FakeTsplPrinter();
+    final usbPrinter = _FakeTsplPrinter();
+    final printerProfiles = PrinterProfileRepository(database);
+    await printerProfiles.saveProfile(
+      id: 'packing-usb',
+      name: 'Packing station USB printer',
+      address: '/dev/bus/usb/001/004',
+      connectionType: PrinterConnectionType.usb,
+    );
+    await printerProfiles.setDefault('packing-usb');
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((Ref ref) async => database),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: PrintingPage(
+            initialRecordIds: const <String>['record-1'],
+            printerCatalog: PrinterCatalog(
+              bluetoothPrinter: bluetoothPrinter,
+              usbPrinter: usbPrinter,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final printButton = find.widgetWithText(FilledButton, 'Print 1 label');
+    await tester.ensureVisible(printButton);
+    await tester.tap(printButton);
+    await tester.pumpAndSettle();
+
+    expect(usbPrinter.operations, <String>['connect', 'print', 'disconnect']);
+    expect(bluetoothPrinter.operations, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('uses an incoming label quantity for the selected product', (
     WidgetTester tester,
   ) async {
