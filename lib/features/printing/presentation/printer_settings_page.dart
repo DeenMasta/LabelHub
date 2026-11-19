@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +11,7 @@ import '../../../core/printing/printer_catalog.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../data/printer_profile_repository.dart';
+import '../data/printer_test_print_service.dart';
 import '../domain/entities/printer_profile.dart';
 
 /// Configures the direct Bluetooth and USB printers available from the print
@@ -32,6 +34,7 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   String? _errorMessage;
   bool _isLoading = true;
   bool _isDiscovering = false;
+  String? _testingProfileId;
   PrinterConnectionType _connectionType = PrinterConnectionType.bluetooth;
 
   @override
@@ -184,6 +187,38 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
     }
   }
 
+  Future<void> _printTestLabel(PrinterProfile profile) async {
+    if (_testingProfileId != null) {
+      return;
+    }
+    setState(() {
+      _testingProfileId = profile.id;
+      _errorMessage = null;
+    });
+    try {
+      await PrinterTestPrintService(
+        printerCatalog: _printerCatalog,
+      ).printTestLabel(profile);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Test label sent. If no label feeds, check the printer TSPL mode and Bluetooth connection.',
+            ),
+          ),
+        );
+      }
+    } on Exception catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = _messageFor(error));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _testingProfileId = null);
+      }
+    }
+  }
+
   Future<void> _setDefaultProfile(PrinterProfile profile) async {
     final database = await ref.read(appDatabaseProvider.future);
     await PrinterProfileRepository(database).setDefault(profile.id);
@@ -280,7 +315,9 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
             profiles: _profiles,
             defaultProfileId: _defaultProfileId,
             onSetDefault: _setDefaultProfile,
+            onTestPrint: _printTestLabel,
             onDelete: _deleteProfile,
+            testingProfileId: _testingProfileId,
           ),
         ],
 
@@ -294,6 +331,12 @@ class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
 
   String _messageFor(Object error) {
     final msg = error.toString().toLowerCase();
+    if (error is PrinterTestPrintException) {
+      return error.message;
+    }
+    if (error is PlatformException) {
+      return error.message ?? 'The printer could not be reached.';
+    }
     if (msg.contains('usb_permission_denied')) {
       return 'Allow USB access for the connected printer, then try again.';
     }
@@ -367,7 +410,7 @@ class _ActivePrinterCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        'Active printer',
+                        'Default printer',
                         style: theme.textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: theme.colorScheme.onSurfaceVariant,
@@ -389,7 +432,7 @@ class _ActivePrinterCard extends StatelessWidget {
                         )
                       else
                         Text(
-                          'No printer connected',
+                          'No default printer',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: theme.colorScheme.onSurfaceVariant,
@@ -400,7 +443,7 @@ class _ActivePrinterCard extends StatelessWidget {
                 ),
                 if (isConnected)
                   Chip(
-                    label: const Text('Ready'),
+                    label: const Text('Configured'),
                     backgroundColor: theme.colorScheme.primaryContainer
                         .withValues(alpha: 0.5),
                     side: BorderSide.none,
@@ -418,7 +461,7 @@ class _ActivePrinterCard extends StatelessWidget {
             ] else if (!isLoading) ...<Widget>[
               const SizedBox(height: 16),
               Text(
-                'Connect a printer below to start printing labels.',
+                'Set a printer below to start printing labels.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -568,13 +611,17 @@ class _SavedPrintersSection extends StatelessWidget {
     required this.profiles,
     required this.defaultProfileId,
     required this.onSetDefault,
+    required this.onTestPrint,
     required this.onDelete,
+    required this.testingProfileId,
   });
 
   final List<PrinterProfile> profiles;
   final String? defaultProfileId;
   final ValueChanged<PrinterProfile> onSetDefault;
+  final Future<void> Function(PrinterProfile) onTestPrint;
   final ValueChanged<PrinterProfile> onDelete;
+  final String? testingProfileId;
 
   @override
   Widget build(BuildContext context) {
@@ -599,6 +646,7 @@ class _SavedPrintersSection extends StatelessWidget {
               final index = entry.key;
               final profile = entry.value;
               final isDefault = profile.id == defaultProfileId;
+              final isTesting = profile.id == testingProfileId;
 
               return Column(
                 children: [
@@ -636,8 +684,9 @@ class _SavedPrintersSection extends StatelessWidget {
                         const SizedBox(width: 16),
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert),
-                          onSelected: (String value) {
+                          onSelected: (String value) async {
                             if (value == 'set_active') onSetDefault(profile);
+                            if (value == 'test') await onTestPrint(profile);
                             if (value == 'remove') onDelete(profile);
                           },
                           itemBuilder: (BuildContext context) =>
@@ -647,6 +696,15 @@ class _SavedPrintersSection extends StatelessWidget {
                                     value: 'set_active',
                                     child: Text('Set Active'),
                                   ),
+                                PopupMenuItem<String>(
+                                  value: 'test',
+                                  enabled: !isTesting,
+                                  child: Text(
+                                    isTesting
+                                        ? 'Sending test label…'
+                                        : 'Print test label',
+                                  ),
+                                ),
                                 const PopupMenuItem<String>(
                                   value: 'remove',
                                   child: Text('Remove Printer'),
