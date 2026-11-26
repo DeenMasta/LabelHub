@@ -10,6 +10,7 @@ import '../../../core/printing/printer_catalog.dart';
 import '../../../core/printing/tspl_label_command_encoder.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
+import '../../labels/data/label_print_settings_repository.dart';
 import '../../labels/domain/entities/label_layout.dart';
 import '../../records/data/record_repository.dart';
 import '../../records/domain/entities/catalogue_record.dart';
@@ -86,6 +87,9 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
     });
     try {
       final database = await ref.read(appDatabaseProvider.future);
+      final defaultSettings = widget.initialLayoutId == null
+          ? await LabelPrintSettingsRepository(database).load()
+          : null;
       final printerProfiles = PrinterProfileRepository(database);
       final results = await Future.wait<Object?>(<Future<Object?>>[
         RecordRepository(database).list(),
@@ -99,6 +103,11 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         return;
       }
       setState(() {
+        if (defaultSettings != null) {
+          _layout = defaultSettings.layout;
+          _primaryFieldKey = defaultSettings.primaryFieldKey;
+          _secondaryFieldKey = defaultSettings.secondaryFieldKey;
+        }
         _records = records;
         _recordCopies.removeWhere(
           (String id, _) =>

@@ -1,30 +1,87 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_theme.dart';
+import '../../../core/database/database_provider.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../templates/data/builtin_templates.dart';
 import '../../templates/domain/entities/import_template.dart';
 import '../data/barcode_preview_service.dart';
+import '../data/label_print_settings_repository.dart';
 import '../domain/entities/barcode_request.dart';
 import '../domain/entities/label_layout.dart';
 import 'widgets/label_layout_selector.dart';
 
-class LabelsPage extends StatefulWidget {
+class LabelsPage extends ConsumerStatefulWidget {
   const LabelsPage({super.key});
 
   @override
-  State<LabelsPage> createState() => _LabelsPageState();
+  ConsumerState<LabelsPage> createState() => _LabelsPageState();
 }
 
-class _LabelsPageState extends State<LabelsPage> {
+class _LabelsPageState extends ConsumerState<LabelsPage> {
   static const _barcodeService = BarcodePreviewService();
   static const _sampleBarcodeValue = 'DEMO-123456';
 
   String _primaryFieldKey = 'item_name';
   String _secondaryFieldKey = 'price';
   LabelLayout _layout = productLabelLayout;
+  bool _loading = true;
+  bool _loadFailed = false;
+  Future<void> _saving = Future.value();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final database = await ref.read(appDatabaseProvider.future);
+      final settings = await LabelPrintSettingsRepository(database).load();
+      if (!mounted) return;
+      setState(() {
+        _layout = settings.layout;
+        _primaryFieldKey = settings.primaryFieldKey;
+        _secondaryFieldKey = settings.secondaryFieldKey;
+        _loading = false;
+        _loadFailed = false;
+      });
+    } on Exception {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadFailed = true;
+        });
+      }
+    }
+  }
+
+  void _saveSettings() {
+    final settings = (
+      layout: _layout,
+      primaryFieldKey: _primaryFieldKey,
+      secondaryFieldKey: _secondaryFieldKey,
+    );
+    final databaseFuture = ref.read(appDatabaseProvider.future);
+    _saving = _saving
+        .then((_) async {
+          final database = await databaseFuture;
+          await LabelPrintSettingsRepository(database).save(settings);
+        })
+        .catchError((Object error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not save the default label. Try again.'),
+              ),
+            );
+          }
+        });
+  }
 
   BarcodePreview get _sampleBarcodePreview => _barcodeService.create(
     BarcodeRequest(
@@ -38,13 +95,22 @@ class _LabelsPageState extends State<LabelsPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loadFailed) {
+      return Center(
+        child: TextButton(
+          onPressed: _loadSettings,
+          child: const Text('Could not load label settings. Retry'),
+        ),
+      );
+    }
     return AppPageContent(
       children: <Widget>[
         const PageHeading(
           eyebrow: 'Output',
           title: 'Label preview',
           description:
-              'Choose what the label prints, then review the general layout before selecting products.',
+              'Choose your default label for printing, then review its layout before selecting products.',
         ),
         const SizedBox(height: 20),
         _LabelLayoutSummary(layout: _layout),
@@ -54,6 +120,7 @@ class _LabelsPageState extends State<LabelsPage> {
           onChanged: (LabelLayout? layout) {
             if (layout != null) {
               setState(() => _layout = layout);
+              _saveSettings();
             }
           },
         ),
@@ -66,11 +133,13 @@ class _LabelsPageState extends State<LabelsPage> {
           onPrimaryFieldChanged: (String? key) {
             if (key != null) {
               setState(() => _primaryFieldKey = key);
+              _saveSettings();
             }
           },
           onSecondaryFieldChanged: (String? key) {
             if (key != null) {
               setState(() => _secondaryFieldKey = key);
+              _saveSettings();
             }
           },
           onPreparePrint: () => context.push(

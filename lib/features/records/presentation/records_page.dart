@@ -10,14 +10,16 @@ import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../../core/printing/printer_catalog.dart';
 import '../../../core/printing/tspl_label_command_encoder.dart';
-import '../../labels/domain/entities/label_layout.dart';
+import '../../labels/data/label_print_settings_repository.dart';
 import '../../printing/data/direct_label_print_service.dart';
 import '../../printing/data/printer_profile_repository.dart';
 import '../data/record_repository.dart';
 import '../domain/entities/catalogue_record.dart';
 
 class RecordsPage extends ConsumerStatefulWidget {
-  const RecordsPage({super.key});
+  const RecordsPage({this.printerCatalog, super.key});
+
+  final PrinterCatalog? printerCatalog;
 
   @override
   ConsumerState<RecordsPage> createState() => _RecordsPageState();
@@ -157,7 +159,9 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete selected products?'),
-        content: Text('Are you sure you want to delete ${idsToDelete.length} products? This cannot be undone.'),
+        content: Text(
+          'Are you sure you want to delete ${idsToDelete.length} products? This cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -183,9 +187,11 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
 
     try {
       final database = await ref.read(appDatabaseProvider.future);
-      final recordsToDelete = _records.where((r) => idsToDelete.contains(r.id)).toList();
+      final recordsToDelete = _records
+          .where((r) => idsToDelete.contains(r.id))
+          .toList();
       await RecordRepository(database).deleteMany(recordsToDelete);
-      
+
       _selectedRecordIds.clear();
       await _loadRecords();
     } catch (error) {
@@ -202,7 +208,9 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
     final idsToPrint = _selectedRecordIds.toList();
     if (idsToPrint.isEmpty) return;
 
-    final recordsToPrint = _records.where((r) => idsToPrint.contains(r.id)).toList();
+    final recordsToPrint = _records
+        .where((r) => idsToPrint.contains(r.id))
+        .toList();
 
     final recordCopies = await showDialog<Map<String, int>>(
       context: context,
@@ -212,35 +220,42 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
     if (recordCopies == null || recordCopies.isEmpty || !mounted) return;
 
     setState(() => _isPrinting = true);
-    
+
     try {
       final database = await ref.read(appDatabaseProvider.future);
+      final settings = await LabelPrintSettingsRepository(database).load();
       await DirectLabelPrintService(
         printerProfiles: PrinterProfileRepository(database),
-        printerCatalog: PrinterCatalog(),
+        printerCatalog: widget.printerCatalog ?? PrinterCatalog(),
       ).print(
-        records: recordsToPrint,
+        records: recordsToPrint
+            .where((record) => recordCopies.containsKey(record.id))
+            .toList(),
         recordCopies: recordCopies,
-        layout: productLabelLayout,
-        primaryFieldKey: 'item_name',
-        secondaryFieldKey: 'price',
+        layout: settings.layout,
+        primaryFieldKey: settings.primaryFieldKey,
+        secondaryFieldKey: settings.secondaryFieldKey,
       );
-      
+
       final totalLabels = recordCopies.values.fold(0, (sum, val) => sum + val);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sent $totalLabels ${totalLabels == 1 ? 'label' : 'labels'} to the default printer.')),
+          SnackBar(
+            content: Text(
+              'Sent $totalLabels ${totalLabels == 1 ? 'label' : 'labels'} to the default printer.',
+            ),
+          ),
         );
       }
-      
+
       setState(() {
         _selectedRecordIds.clear();
       });
     } on Exception catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_printErrorMessage(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_printErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -264,7 +279,6 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
       _ => 'The labels could not be prepared for printing. Try again.',
     };
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -355,8 +369,12 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
                         key: const Key('records-delete-button'),
                         heroTag: 'records-delete',
                         onPressed: _isPrinting ? null : _deleteSelected,
-                        backgroundColor: Theme.of(context).colorScheme.errorContainer,
-                        foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.errorContainer,
+                        foregroundColor: Theme.of(
+                          context,
+                        ).colorScheme.onErrorContainer,
                         icon: const Icon(Icons.delete_outline),
                         label: Text('Delete ${_selectedRecordIds.length}'),
                       ),
@@ -369,7 +387,9 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(LucideIcons.printer),
                         label: Text('Print ${_selectedRecordIds.length}'),
@@ -629,10 +649,7 @@ class _RecordListCard extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Checkbox(
-                            value: isSelected,
-                            onChanged: onToggle,
-                          ),
+                          Checkbox(value: isSelected, onChanged: onToggle),
                           const _RecordIcon(),
                           const SizedBox(width: 12),
                           Expanded(child: details),
@@ -660,10 +677,7 @@ class _RecordListCard extends StatelessWidget {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Checkbox(
-                      value: isSelected,
-                      onChanged: onToggle,
-                    ),
+                    Checkbox(value: isSelected, onChanged: onToggle),
                     const _RecordIcon(),
                     const SizedBox(width: 12),
                     Expanded(child: details),
@@ -929,7 +943,8 @@ class _BulkPrintQuantityDialog extends StatefulWidget {
   final List<CatalogueRecord> records;
 
   @override
-  State<_BulkPrintQuantityDialog> createState() => _BulkPrintQuantityDialogState();
+  State<_BulkPrintQuantityDialog> createState() =>
+      _BulkPrintQuantityDialogState();
 }
 
 class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
@@ -974,12 +989,12 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
         copiesResult[record.id] = copies;
       }
     }
-    
+
     if (copiesResult.isEmpty) {
       setState(() => _generalError = 'Enter at least 1 label for one product.');
       return;
     }
-    
+
     Navigator.pop(context, copiesResult);
   }
 
@@ -1011,7 +1026,9 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                   const SizedBox(height: 4),
                   Text(
                     'Set label quantity for each product.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.mutedInk),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: AppTheme.mutedInk),
                   ),
                 ],
               ),
@@ -1022,7 +1039,8 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                 shrinkWrap: true,
                 padding: const EdgeInsets.all(24),
                 itemCount: widget.records.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 16),
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 16),
                 itemBuilder: (context, index) {
                   final record = widget.records[index];
                   final currentCopies = _copies[record.id] ?? 1;
@@ -1033,7 +1051,8 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                           record.name,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -1046,7 +1065,9 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                               minimumSize: const Size.square(40),
                               maximumSize: const Size.square(40),
                               shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                                borderRadius: BorderRadius.all(
+                                  Radius.circular(8),
+                                ),
                               ),
                             ),
                             onPressed: currentCopies > 0
@@ -1067,7 +1088,9 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700),
                               decoration: const InputDecoration(
-                                contentPadding: EdgeInsets.symmetric(vertical: 8),
+                                contentPadding: EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
                               ),
                               onChanged: (String value) {
                                 final copies = int.tryParse(value);
@@ -1087,10 +1110,13 @@ class _BulkPrintQuantityDialogState extends State<_BulkPrintQuantityDialog> {
                               minimumSize: const Size.square(40),
                               maximumSize: const Size.square(40),
                               shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                                borderRadius: BorderRadius.all(
+                                  Radius.circular(8),
+                                ),
                               ),
                             ),
-                            onPressed: () => _setCopies(record.id, currentCopies + 1),
+                            onPressed: () =>
+                                _setCopies(record.id, currentCopies + 1),
                             icon: const Icon(LucideIcons.plus, size: 16),
                           ),
                         ],

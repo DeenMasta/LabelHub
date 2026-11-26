@@ -8,6 +8,9 @@ import 'package:labelhub/core/database/app_database.dart';
 import 'package:labelhub/core/database/database_provider.dart';
 import 'package:labelhub/core/printing/label_printer.dart';
 import 'package:labelhub/core/printing/printer_catalog.dart';
+import 'package:labelhub/features/labels/data/label_print_settings_repository.dart';
+import 'package:labelhub/features/labels/domain/entities/label_layout.dart';
+import 'package:labelhub/features/labels/presentation/labels_page.dart';
 import 'package:labelhub/features/printing/data/printer_profile_repository.dart';
 import 'package:labelhub/features/records/presentation/record_details_page.dart';
 import 'package:labelhub/features/records/presentation/records_page.dart';
@@ -140,6 +143,11 @@ void main() {
   testWidgets('prints the viewed record directly from its detail page', (
     WidgetTester tester,
   ) async {
+    await LabelPrintSettingsRepository(database).save((
+      layout: priceLabelLayout,
+      primaryFieldKey: 'item_code',
+      secondaryFieldKey: '',
+    ));
     final printer = _FakeLabelPrinter();
     final router = GoRouter(
       initialLocation: '/records/record-2',
@@ -177,14 +185,85 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Print labels'));
     await tester.pumpAndSettle();
 
-    expect(printer.operations, <String>['connect', 'print', 'disconnect']);
+    expect(printer.operations, <String>['connect', 'print']);
     expect(printer.request!.recordIds, <String>['record-2']);
     expect(printer.request!.labels.single.copies, 100);
     expect(printer.request!.labels.single.expiryDate, '2027-12-31');
     expect(printer.request!.labels.single.receiveDate, '2026-11-19');
+    expect(printer.request!.isPriceLabel, isTrue);
+    expect(printer.request!.labels.single.primaryText, 'ITEM-001');
+    expect(printer.request!.labels.single.secondaryText, isEmpty);
     expect(find.byType(RecordDetailsPage), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'saves the selected label and uses it to print searched products',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final printer = _FakeLabelPrinter();
+      final router = GoRouter(
+        initialLocation: '/labels',
+        routes: [
+          GoRoute(
+            path: '/labels',
+            builder: (_, _) => const Scaffold(body: LabelsPage()),
+          ),
+          GoRoute(
+            path: '/records',
+            builder: (_, _) => Scaffold(
+              body: RecordsPage(
+                printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider.overrideWith((ref) async => database),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.light,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<LabelLayout>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Price label').last);
+      await tester.pumpAndSettle();
+      router.go('/records');
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(EditableText), 'zebra');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(Checkbox).first);
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('records-print-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Print labels'));
+      await tester.pumpAndSettle();
+      expect(printer.request!.recordIds, ['record-1']);
+      expect(printer.request!.isPriceLabel, isTrue);
+      expect(printer.request!.labelWidthMm, 40);
+      expect(printer.request!.labelHeightMm, 30);
+      router.go('/labels');
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DropdownButtonFormField<LabelLayout>>(
+              find.byType(DropdownButtonFormField<LabelLayout>),
+            )
+            .initialValue,
+        priceLabelLayout,
+      );
+    },
+  );
 
   testWidgets('opens imports from the floating import action', (
     WidgetTester tester,

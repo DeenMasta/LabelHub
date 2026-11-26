@@ -11,7 +11,7 @@ import '../../../core/printing/tspl_label_command_encoder.dart';
 import '../../../core/presentation/widgets/app_page_content.dart';
 import '../../../core/presentation/widgets/page_heading.dart';
 import '../../../core/validation/import_validation_service.dart';
-import '../../labels/domain/entities/label_layout.dart';
+import '../../labels/data/label_print_settings_repository.dart';
 import '../../templates/domain/entities/import_template.dart';
 import '../../templates/presentation/active_product_template_provider.dart';
 import '../../printing/data/direct_label_print_service.dart';
@@ -188,15 +188,16 @@ class _RecordDetailsPageState extends ConsumerState<RecordDetailsPage> {
     setState(() => _isPrinting = true);
     try {
       final database = await ref.read(appDatabaseProvider.future);
+      final settings = await LabelPrintSettingsRepository(database).load();
       await DirectLabelPrintService(
         printerProfiles: PrinterProfileRepository(database),
         printerCatalog: widget.printerCatalog ?? PrinterCatalog(),
       ).print(
         records: <CatalogueRecord>[record],
         recordCopies: <String, int>{record.id: copies},
-        layout: productLabelLayout,
-        primaryFieldKey: 'item_name',
-        secondaryFieldKey: 'price',
+        layout: settings.layout,
+        primaryFieldKey: settings.primaryFieldKey,
+        secondaryFieldKey: settings.secondaryFieldKey,
       );
       _showMessage(
         'Sent $copies ${copies == 1 ? 'label' : 'labels'} to the default printer.',
