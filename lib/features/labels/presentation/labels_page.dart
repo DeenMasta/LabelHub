@@ -135,10 +135,6 @@ class _LabelLayoutSummary extends StatelessWidget {
                   const Text(
                     'Fixed layout with configurable product-field bindings.',
                   ),
-                  if (layout.isPriceLabel) ...<Widget>[
-                    const SizedBox(height: 4),
-                    const Text('Price-only layout; barcode is omitted.'),
-                  ],
                 ],
               ),
             ),
@@ -207,10 +203,13 @@ class _LabelPreviewPanel extends StatelessWidget {
                       child: _LabelPreviewSurface(
                         layout: layout,
                         primaryText: _fieldDisplayName(primaryFieldKey),
-                        secondaryText: _fieldDisplayName(secondaryFieldKey),
+                        secondaryText:
+                            layout.isPriceLabel && secondaryFieldKey == 'price'
+                            ? 'RM 8.00'
+                            : _fieldDisplayName(secondaryFieldKey),
                         barcodeValue: 'DEMO-123456',
-                        expiryDate: '2027-12-31',
-                        receiveDate: '2026-11-19',
+                        expiryDate: layout.isPriceLabel ? '' : '2027-12-31',
+                        receiveDate: layout.isPriceLabel ? '' : '2026-11-19',
                         barcodePreview: barcodePreview,
                       ),
                     ),
@@ -391,10 +390,9 @@ class _LabelPreviewSurface extends StatelessWidget {
       builder: (BuildContext context, BoxConstraints constraints) {
         final pixelsPerMm = constraints.maxWidth / layout.widthMm;
         final horizontalPadding = layout.horizontalPaddingMm * pixelsPerMm;
-        final verticalPadding = layout.verticalPaddingMm * pixelsPerMm;
         final barcodeWidth = layout.barcodeWidthMm * pixelsPerMm;
         final barcodeHeight = layout.barcodeHeightMm * pixelsPerMm;
-        final barcodeTop = 9 * pixelsPerMm;
+        final barcodeTop = (layout.isPriceLabel ? 14.5 : 9) * pixelsPerMm;
         return DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -404,34 +402,41 @@ class _LabelPreviewSurface extends StatelessWidget {
           child: Stack(
             children: <Widget>[
               Positioned(
-                top: layout.isPriceLabel ? verticalPadding : 1.5 * pixelsPerMm,
+                top: 1.5 * pixelsPerMm,
                 left: horizontalPadding,
                 right: horizontalPadding,
                 child: Text(
                   primaryText,
+                  key: const ValueKey<String>('label-preview-primary'),
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize:
-                        (primaryText.length <= 11 ? 4.2 : 2.5) * pixelsPerMm,
+                        (layout.isPriceLabel
+                            ? 5
+                            : primaryText.length <= 11
+                            ? 4.2
+                            : 2.5) *
+                        pixelsPerMm,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.navy,
                   ),
                 ),
               ),
               Positioned(
-                top: layout.isPriceLabel
-                    ? verticalPadding + (7 * pixelsPerMm)
-                    : 6 * pixelsPerMm,
+                top: (layout.isPriceLabel ? 8 : 6) * pixelsPerMm,
                 left: horizontalPadding,
                 right: horizontalPadding,
                 child: Text(
                   secondaryText,
-                  textAlign: TextAlign.left,
+                  key: const ValueKey<String>('label-preview-secondary'),
+                  textAlign: layout.isPriceLabel
+                      ? TextAlign.center
+                      : TextAlign.left,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: (layout.isPriceLabel ? 4 : 3) * pixelsPerMm,
+                    fontSize: (layout.isPriceLabel ? 5 : 3) * pixelsPerMm,
                     fontWeight: layout.isPriceLabel
                         ? FontWeight.w800
                         : FontWeight.normal,
@@ -439,36 +444,37 @@ class _LabelPreviewSurface extends StatelessWidget {
                   ),
                 ),
               ),
-              if (!layout.isPriceLabel)
-                Positioned(
-                  top: barcodeTop,
-                  left: horizontalPadding,
-                  width: barcodeWidth,
-                  height: barcodeHeight,
-                  child: _BarcodeGraphic(preview: barcodePreview),
-                ),
-              if (!layout.isPriceLabel)
-                Positioned(
-                  top: barcodeTop + barcodeHeight,
-                  left: horizontalPadding,
-                  width: barcodeWidth,
-                  height: 3 * pixelsPerMm,
-                  child: Center(
-                    child: Text(
-                      barcodeValue,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 2 * pixelsPerMm,
-                        letterSpacing: .5,
-                        color: AppTheme.navy,
-                      ),
+              Positioned(
+                top: barcodeTop,
+                left: horizontalPadding,
+                width: barcodeWidth,
+                height: barcodeHeight,
+                child: _BarcodeGraphic(preview: barcodePreview),
+              ),
+              Positioned(
+                top: barcodeTop + barcodeHeight,
+                left: horizontalPadding,
+                width: barcodeWidth,
+                height: 3 * pixelsPerMm,
+                child: Center(
+                  child: Text(
+                    barcodeValue,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 2 * pixelsPerMm,
+                      letterSpacing: .5,
+                      color: AppTheme.navy,
                     ),
                   ),
                 ),
-              if (!layout.isPriceLabel)
+              ),
+              if (expiryDate.isNotEmpty)
                 Positioned(
-                  top: barcodeTop + barcodeHeight + (3.5 * pixelsPerMm),
+                  top:
+                      barcodeTop +
+                      barcodeHeight +
+                      ((layout.isPriceLabel ? 3 : 3.5) * pixelsPerMm),
                   left: horizontalPadding,
                   right: horizontalPadding,
                   child: Text(
@@ -477,27 +483,12 @@ class _LabelPreviewSurface extends StatelessWidget {
                     style: TextStyle(fontSize: 1.25 * pixelsPerMm),
                   ),
                 ),
-              if (layout.isPriceLabel)
+              if (receiveDate.isNotEmpty)
                 Positioned(
-                  top: verticalPadding + (20 * pixelsPerMm),
-                  left: horizontalPadding,
-                  child: Text(
-                    'EXP:$expiryDate',
-                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
-                  ),
-                ),
-              if (layout.isPriceLabel)
-                Positioned(
-                  top: verticalPadding + (22 * pixelsPerMm),
-                  left: horizontalPadding,
-                  child: Text(
-                    'RCV:$receiveDate',
-                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
-                  ),
-                ),
-              if (!layout.isPriceLabel)
-                Positioned(
-                  top: barcodeTop + barcodeHeight + (6 * pixelsPerMm),
+                  top:
+                      barcodeTop +
+                      barcodeHeight +
+                      ((layout.isPriceLabel ? 5.5 : 6) * pixelsPerMm),
                   left: horizontalPadding,
                   right: horizontalPadding,
                   child: Text(

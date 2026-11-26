@@ -47,16 +47,20 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
   }
 
   @override
-  Future<PrintResult> printLabels(PrintRequest request) {
+  Future<PrintResult> printLabels(PrintRequest request) async {
     if (_connectedDevice == null) {
-      return Future<PrintResult>.value(
-        const PrintResult(
-          succeeded: false,
-          message: 'Connect a USB printer before printing.',
-        ),
+      return const PrintResult(
+        succeeded: false,
+        message: 'Connect a USB printer before printing.',
       );
     }
-    return _send(const TsplLabelCommandEncoder().encode(request));
+    try {
+      return _send(
+        await const TsplLabelCommandEncoder().encodeForPrinter(request),
+      );
+    } on Exception catch (error) {
+      return PrintResult(succeeded: false, message: error.toString());
+    }
   }
 
   @override
@@ -85,7 +89,10 @@ class UsbThermalPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
       const chunkSize = 4096;
       for (var start = 0; start < commands.length; start += chunkSize) {
         final end = (start + chunkSize).clamp(0, commands.length);
-        await _channel.invokeMethod<void>('write', commands.sublist(start, end));
+        await _channel.invokeMethod<void>(
+          'write',
+          commands.sublist(start, end),
+        );
       }
       return const PrintResult(succeeded: true);
     } on Exception catch (error) {

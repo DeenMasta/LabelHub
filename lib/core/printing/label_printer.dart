@@ -43,6 +43,7 @@ class PrintRequest {
     required this.labelWidthMm,
     required this.labelHeightMm,
     this.isPriceLabel = false,
+    this.secondaryFieldIsPrice = true,
   });
 
   final List<String> recordIds;
@@ -50,6 +51,7 @@ class PrintRequest {
   final double labelWidthMm;
   final double labelHeightMm;
   final bool isPriceLabel;
+  final bool secondaryFieldIsPrice;
 }
 
 /// Printer-independent label content prepared from a product record.

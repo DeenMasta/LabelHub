@@ -58,7 +58,9 @@ class BluetoothThermalPrinter
       );
     }
     try {
-      final commands = const TsplLabelCommandEncoder().encode(request);
+      final commands = await const TsplLabelCommandEncoder().encodeForPrinter(
+        request,
+      );
       await _writeInChunks(commands);
       return const PrintResult(succeeded: true);
     } on Exception catch (error) {

@@ -7,6 +7,7 @@ import 'package:labelhub/core/database/app_database.dart';
 import 'package:labelhub/core/database/database_provider.dart';
 import 'package:labelhub/core/printing/label_printer.dart';
 import 'package:labelhub/core/printing/printer_catalog.dart';
+import 'package:labelhub/core/printing/tspl_label_command_encoder.dart';
 import 'package:labelhub/features/printing/data/printer_profile_repository.dart';
 import 'package:labelhub/features/printing/presentation/printing_page.dart';
 
@@ -113,7 +114,94 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(printer.operations, <String>['connect', 'print']);
+    expect(printer.lastRequest!.secondaryFieldIsPrice, isTrue);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('passes the selected non-price field to the printer', (
+    tester,
+  ) async {
+    final printer = _FakeTsplPrinter();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((Ref ref) async => database),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: PrintingPage(
+            initialRecordIds: const <String>['record-1'],
+            initialLayoutId: 'price-label-40x30',
+            initialSecondaryFieldKey: 'item_name',
+            printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final button = find.widgetWithText(FilledButton, 'Print 1 label');
+    await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(printer.lastRequest!.secondaryFieldIsPrice, isFalse);
+    expect(printer.lastRequest!.labels.single.secondaryText, 'Blue T-Shirt');
+  });
+
+  testWidgets('sends the no-date price-label layout to the printer', (
+    tester,
+  ) async {
+    await database.saveImportBatch(
+      batchId: 'batch-ayam',
+      templateId: 'system-product-v1',
+      fileName: 'ayam.csv',
+      totalRows: 1,
+      validRows: 1,
+      invalidRows: 0,
+      records: const <DatabaseRecordInsert>[
+        DatabaseRecordInsert(
+          id: 'ayam',
+          reference: 'Ayam',
+          barcodeValue: '2000112005052',
+          values: <String, String>{
+            'item_name': 'Ayam',
+            'price': '0.00',
+            'barcode': '2000112005052',
+          },
+        ),
+      ],
+    );
+    final printer = _FakeTsplPrinter();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((Ref ref) async => database),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: PrintingPage(
+            initialRecordIds: const <String>['ayam'],
+            initialLayoutId: 'price-label-40x30',
+            printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final button = find.widgetWithText(FilledButton, 'Print 1 label');
+    await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    final request = printer.lastRequest!;
+    expect(request.isPriceLabel, isTrue);
+    expect(request.labels.single.expiryDate, isEmpty);
+    expect(request.labels.single.receiveDate, isEmpty);
+    final commands = String.fromCharCodes(
+      const TsplLabelCommandEncoder().encode(request),
+    );
+    expect(commands, contains('TEXT 24,12,"5",0,1,1,"Ayam"'));
+    expect(commands, contains('TEXT 48,64,"3",0,2,2,"RM 0.00"'));
   });
 
   testWidgets('calibrates media only when requested', (
@@ -213,6 +301,7 @@ void main() {
 
 class _FakeTsplPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
   final List<String> operations = <String>[];
+  PrintRequest? lastRequest;
 
   @override
   Future<PrintResult> calibrateTsplMedia({
@@ -239,6 +328,7 @@ class _FakeTsplPrinter implements LabelPrinter, TsplMediaCalibratingPrinter {
   @override
   Future<PrintResult> printLabels(PrintRequest request) async {
     operations.add('print');
+    lastRequest = request;
     return const PrintResult(succeeded: true);
   }
 }

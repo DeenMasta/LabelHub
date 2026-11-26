@@ -74,7 +74,9 @@ class DirectLabelPrintService {
     LabelPrinter? connectedPrinter;
     var completed = false;
     try {
-      connectedPrinter = _printerCatalog.printerFor(selectedProfile.connectionType);
+      connectedPrinter = _printerCatalog.printerFor(
+        selectedProfile.connectionType,
+      );
       await connectedPrinter.connect(selectedPrinter);
       final result = await connectedPrinter.printLabels(
         PrintRequest(
@@ -96,6 +98,7 @@ class DirectLabelPrintService {
           labelWidthMm: layout.widthMm,
           labelHeightMm: layout.heightMm,
           isPriceLabel: layout.isPriceLabel,
+          secondaryFieldIsPrice: secondaryFieldKey == 'price',
         ),
       );
       if (!result.succeeded) {

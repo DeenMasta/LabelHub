@@ -69,7 +69,7 @@ const priceLabelLayout = LabelLayout(
   horizontalPaddingMm: 3,
   verticalPaddingMm: 3,
   barcodeWidthMm: 34,
-  barcodeHeightMm: 10,
+  barcodeHeightMm: 6.5,
   isPriceLabel: true,
 );
 

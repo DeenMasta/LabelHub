@@ -18,7 +18,7 @@ void main() {
     expect(layout.barcodeWidthMm, 24);
   });
 
-  test('includes a 40 by 30 mm price label without a barcode', () {
+  test('includes a 40 by 30 mm price label', () {
     final layout = productLabelLayoutForId('price-label-40x30');
 
     expect(layout, priceLabelLayout);

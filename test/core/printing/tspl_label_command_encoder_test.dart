@@ -159,7 +159,7 @@ void main() {
     expect(commands, isNot(contains('BARCODE')));
   });
 
-  test('encodes an enlarged price label without barcode commands', () {
+  test('encodes a price label with centered price and left-aligned dates', () {
     final commands = String.fromCharCodes(
       encoder.encode(
         PrintRequest(
@@ -181,11 +181,12 @@ void main() {
       ),
     );
 
-    expect(commands, contains('TEXT 24,84,"2",0,2,2,"RM 29.90"'));
-    expect(commands, contains('TEXT 24,160,"1",0,1,1,"EXP:2027-12-31"'));
-    expect(commands, contains('TEXT 24,176,"1",0,1,1,"RCV:2026-11-19"'));
-    expect(commands, isNot(contains('BARCODE')));
-    expect(commands, isNot(contains('ITEM-1001')));
+    expect(commands, contains('TEXT 24,8,"4",0,1,1,"Blue T-Shirt"'));
+    expect(commands, contains('TEXT 64,44,"2",0,2,2,"RM 29.90"'));
+    expect(commands, contains('BARCODE 26,88,"128",40,0,0,2,2,"ITEM-1001"'));
+    expect(commands, contains('TEXT 106,130,"1",0,1,1,"ITEM-1001"'));
+    expect(commands, contains('TEXT 24,158,"1",0,1,1,"EXP:2027-12-31"'));
+    expect(commands, contains('TEXT 24,180,"1",0,1,1,"RCV:2026-11-19"'));
   });
 
   test('keeps price-label dates below a two-line product name', () {
@@ -210,9 +211,205 @@ void main() {
       ),
     );
 
-    expect(commands, contains('TEXT 24,100,"2",0,2,2,"RM 29.90"'));
-    expect(commands, contains('TEXT 24,168,"1",0,1,1,"EXP:2027-12-31"'));
-    expect(commands, contains('TEXT 24,184,"1",0,1,1,"RCV:2026-11-19"'));
+    expect(commands, contains('TEXT 24,8,"3",0,1,1,"Delicious Blueberry"'));
+    expect(commands, contains('TEXT 24,32,"3",0,1,1,"Muffin"'));
+    expect(commands, contains('TEXT 64,60,"2",0,2,2,"RM 29.90"'));
+    expect(commands, contains('TEXT 24,174,"1",0,1,1,"EXP:2027-12-31"'));
+    expect(commands, contains('TEXT 24,196,"1",0,1,1,"RCV:2026-11-19"'));
+    expect(commands, isNot(contains('BARCODE')));
+  });
+
+  test('prints a reference-style price label without dates', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(
+        const PrintRequest(
+          recordIds: <String>['a'],
+          labels: <PrintLabelData>[
+            PrintLabelData(
+              primaryText: 'As-Syifa Rempah Ayam Madu 150g',
+              secondaryText: 'RM 8.00',
+              barcodeValue: '1111016484',
+              copies: 1,
+            ),
+          ],
+          labelWidthMm: 40,
+          labelHeightMm: 30,
+          isPriceLabel: true,
+        ),
+      ),
+    );
+    expect(commands, contains('TEXT 24,12,"3",0,1,1,"As-Syifa Rempah"'));
+    expect(commands, contains('TEXT 24,36,"3",0,1,1,"Ayam Madu 150g"'));
+    expect(commands, contains('TEXT 48,64,"3",0,2,2,"RM 8.00"'));
+    expect(commands, contains('BARCODE 70,116,"128",52,0,0,2,2,"1111016484"'));
+    expect(commands, contains('TEXT 100,170,"1",0,1,1,"1111016484"'));
+  });
+
+  test(
+    'adds RM to prices once and keeps a centered enlarged price without dates',
+    () {
+      for (final value in ['8.00', 'RM 8.00', 'rm8.00']) {
+        final commands = String.fromCharCodes(
+          encoder.encode(
+            PrintRequest(
+              recordIds: const <String>['a'],
+              labels: <PrintLabelData>[
+                PrintLabelData(
+                  primaryText: 'Milk',
+                  secondaryText: value,
+                  barcodeValue: '1111016484',
+                  copies: 1,
+                ),
+              ],
+              labelWidthMm: 40,
+              labelHeightMm: 30,
+              isPriceLabel: true,
+            ),
+          ),
+        );
+        expect(commands, contains('TEXT 24,12,"5",0,1,1,"Milk"'));
+        expect(commands, contains('TEXT 48,64,"3",0,2,2,"RM 8.00"'));
+        expect(
+          commands,
+          contains('BARCODE 70,116,"128",52,0,0,2,2,"1111016484"'),
+        );
+        expect(commands, isNot(contains('RM RM')));
+      }
+    },
+  );
+
+  test('does not add RM to an empty or non-price second field', () {
+    PrintRequest priceLabel(String value, {bool isPrice = true}) =>
+        PrintRequest(
+          recordIds: const <String>['a'],
+          labels: <PrintLabelData>[
+            PrintLabelData(
+              primaryText: 'Milk',
+              secondaryText: value,
+              barcodeValue: '',
+              copies: 1,
+            ),
+          ],
+          labelWidthMm: 40,
+          labelHeightMm: 30,
+          isPriceLabel: true,
+          secondaryFieldIsPrice: isPrice,
+        );
+    expect(
+      String.fromCharCodes(encoder.encode(priceLabel(''))),
+      isNot(contains('RM')),
+    );
+    final commands = String.fromCharCodes(
+      encoder.encode(priceLabel('Fresh', isPrice: false)),
+    );
+    expect(commands, contains('"Fresh"'));
+    expect(commands, isNot(contains('RM')));
+  });
+
+  test('fits a long name without dates and enlarges a short dated name', () {
+    PrintRequest label(String name, String expiry) => PrintRequest(
+      recordIds: const <String>['a'],
+      labels: <PrintLabelData>[
+        PrintLabelData(
+          primaryText: name,
+          secondaryText: '8.00',
+          barcodeValue: '1111016484',
+          copies: 1,
+          expiryDate: expiry,
+        ),
+      ],
+      labelWidthMm: 40,
+      labelHeightMm: 30,
+      isPriceLabel: true,
+    );
+    final long = String.fromCharCodes(encoder.encode(label('x' * 60, '')));
+    expect(long, contains('TEXT 24,12,"2",0,1,1,"${'x' * 22}"'));
+    expect(long, contains('TEXT 24,52,"2",0,1,1,"${'x' * 16}"'));
+    expect(long, contains('TEXT 48,76,"3",0,2,2,"RM 8.00"'));
+    expect(long, contains('BARCODE 70,128,"128",52,0,0,2,2,"1111016484"'));
+    final dated = String.fromCharCodes(
+      encoder.encode(label('Milk', '2027-12-31')),
+    );
+    expect(dated, contains('TEXT 24,8,"5",0,1,1,"Milk"'));
+    expect(dated, contains('TEXT 76,60,"2",0,2,2,"RM 8.00"'));
+    expect(dated, contains('TEXT 24,182,"1",0,1,1,"EXP:2027-12-31"'));
+  });
+
+  test('rejects price-label names and barcodes that cannot fit', () {
+    PrintRequest priceRequest(String name, String barcode) => PrintRequest(
+      recordIds: const <String>['a'],
+      labels: <PrintLabelData>[
+        PrintLabelData(
+          primaryText: name,
+          secondaryText: 'RM 8.00',
+          barcodeValue: barcode,
+          copies: 1,
+        ),
+      ],
+      labelWidthMm: 40,
+      labelHeightMm: 30,
+      isPriceLabel: true,
+    );
+    expect(
+      () => encoder.encode(priceRequest('x' * 100, '123')),
+      throwsFormatException,
+    );
+    expect(
+      () => encoder.encode(priceRequest('Milk', 'A' * 40)),
+      throwsFormatException,
+    );
+  });
+
+  test('left-aligns a receive date when no expiry date is present', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(
+        const PrintRequest(
+          recordIds: <String>['a'],
+          labels: <PrintLabelData>[
+            PrintLabelData(
+              primaryText: 'Milk',
+              secondaryText: '8.00',
+              barcodeValue: '1111016484',
+              copies: 1,
+              receiveDate: '2026-11-26',
+            ),
+          ],
+          labelWidthMm: 40,
+          labelHeightMm: 30,
+          isPriceLabel: true,
+        ),
+      ),
+    );
+    expect(commands, contains('TEXT 24,182,"1",0,1,1,"RCV:2026-11-26"'));
+    expect(commands, isNot(contains('EXP:')));
+  });
+
+  test('fits a three-line price-label name with both dates', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(
+        const PrintRequest(
+          recordIds: <String>['a'],
+          labels: <PrintLabelData>[
+            PrintLabelData(
+              primaryText: 'Delicious blueberry muffin with chocolate chips',
+              secondaryText: 'RM 8.00',
+              barcodeValue: '1111016484',
+              copies: 1,
+              expiryDate: '2027-12-31',
+              receiveDate: '2026-11-19',
+            ),
+          ],
+          labelWidthMm: 40,
+          labelHeightMm: 30,
+          isPriceLabel: true,
+        ),
+      ),
+    );
+    expect(commands, contains('TEXT 24,48,"2",0,1,1,"chips"'));
+    expect(commands, contains('TEXT 76,72,"2",0,2,2,"RM 8.00"'));
+    expect(commands, contains('BARCODE 70,116,"128",40,0,0,2,2,"1111016484"'));
+    expect(commands, contains('TEXT 24,186,"1",0,1,1,"EXP:2027-12-31"'));
+    expect(commands, contains('TEXT 24,208,"1",0,1,1,"RCV:2026-11-19"'));
   });
 
   test('prints receive date below expiry below the barcode', () {
