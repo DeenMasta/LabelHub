@@ -157,7 +157,7 @@ class _DashboardHero extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: () => context.go(nextStep.path),
+              onPressed: () => context.push(nextStep.path),
               icon: Icon(nextStep.icon),
               label: Text(nextStep.actionLabel),
               style: FilledButton.styleFrom(
@@ -349,7 +349,7 @@ class _RecentRecordsCard extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => context.go('/records'),
+                  onPressed: () => context.push('/records'),
                   child: const Text('View all'),
                 ),
               ],
@@ -378,7 +378,7 @@ class _RecentRecordRow extends StatelessWidget {
       button: true,
       label: 'Open ${record.name}',
       child: InkWell(
-        onTap: () => context.go('/records/${record.id}'),
+        onTap: () => context.push('/records/${record.id}'),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),

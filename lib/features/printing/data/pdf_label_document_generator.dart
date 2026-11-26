@@ -102,16 +102,24 @@ class PdfLabelDocumentGenerator {
             children: <pw.Widget>[
               pw.Text(
                 _valueFor(record, primaryFieldKey),
-                maxLines: 2,
+                maxLines: 3,
                 overflow: pw.TextOverflow.clip,
-                style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3.8)),
+                style: pw.TextStyle(
+                  fontSize: LabelUnits.mmToPoints(
+                    _valueFor(record, primaryFieldKey).length <= 11 ? 4.2 : 2.5,
+                  ),
+                ),
               ),
               pw.SizedBox(height: LabelUnits.mmToPoints(0.5)),
-              pw.Text(
-                _valueFor(record, secondaryFieldKey),
-                maxLines: 1,
-                overflow: pw.TextOverflow.clip,
-                style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3)),
+              pw.SizedBox(
+                width: barcodeWidth,
+                child: pw.Text(
+                  _valueFor(record, secondaryFieldKey),
+                  textAlign: pw.TextAlign.left,
+                  maxLines: 1,
+                  overflow: pw.TextOverflow.clip,
+                  style: pw.TextStyle(fontSize: LabelUnits.mmToPoints(3)),
+                ),
               ),
             ],
           ),

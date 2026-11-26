@@ -117,7 +117,7 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
             isExporting: _isExporting,
             isSavingRequirements: _isSavingRequirements,
             onExport: () => _exportCsvTemplate(value),
-            onImport: () => context.go('/imports'),
+            onImport: () => context.push('/imports'),
             onRequiredChanged: (TemplateField field, bool required) =>
                 _setRequired(value, field, required),
           ),
@@ -643,7 +643,7 @@ class _TemplateFieldsCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        'Turn on a field to require it in every imported row. Barcode is always required for label printing.',
+                        'Turn on a field to require it in every imported row. Barcode is optional and prints only when supplied.',
                       ),
                     ],
                   ),
@@ -716,7 +716,7 @@ class _TemplateFieldRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final detail = isBarcodeField
-        ? 'Always required for barcode labels'
+        ? 'Optional; prints only when supplied'
         : field.example == null
         ? 'Require this field in every imported row'
         : 'Example: ${field.example}';
@@ -835,7 +835,7 @@ class _LockedRequiredField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Tooltip(
-      message: 'Barcode is required to create barcode labels',
+      message: 'Barcode is optional for product and price labels',
       child: SizedBox(
         width: 44,
         height: 44,

@@ -112,7 +112,7 @@ void main() {
     await tester.tap(printButton);
     await tester.pumpAndSettle();
 
-    expect(printer.operations, <String>['connect', 'print', 'disconnect']);
+    expect(printer.operations, <String>['connect', 'print']);
     expect(tester.takeException(), isNull);
   });
 
@@ -139,7 +139,7 @@ void main() {
     await tester.tap(find.text('Calibrate label media'));
     await tester.pumpAndSettle();
 
-    expect(printer.operations, <String>['connect', 'calibrate', 'disconnect']);
+    expect(printer.operations, <String>['connect', 'calibrate']);
     expect(tester.takeException(), isNull);
   });
 
@@ -148,6 +148,8 @@ void main() {
   ) async {
     final bluetoothPrinter = _FakeTsplPrinter();
     final usbPrinter = _FakeTsplPrinter();
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final printerProfiles = PrinterProfileRepository(database);
     await printerProfiles.saveProfile(
       id: 'packing-usb',

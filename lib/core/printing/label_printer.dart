@@ -42,12 +42,14 @@ class PrintRequest {
     required this.labels,
     required this.labelWidthMm,
     required this.labelHeightMm,
+    this.isPriceLabel = false,
   });
 
   final List<String> recordIds;
   final List<PrintLabelData> labels;
   final double labelWidthMm;
   final double labelHeightMm;
+  final bool isPriceLabel;
 }
 
 /// Printer-independent label content prepared from a product record.
@@ -57,12 +59,16 @@ class PrintLabelData {
     required this.secondaryText,
     required this.barcodeValue,
     required this.copies,
+    this.expiryDate = '',
+    this.receiveDate = '',
   });
 
   final String primaryText;
   final String secondaryText;
   final String barcodeValue;
   final int copies;
+  final String expiryDate;
+  final String receiveDate;
 }
 
 class PrintResult {

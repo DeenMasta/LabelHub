@@ -3,7 +3,7 @@ import '../domain/entities/import_template.dart';
 const productTemplate = ImportTemplate(
   id: 'system-product-v1',
   name: 'Product label',
-  description: 'Products with an Item, SKU, Barcode, and optional pricing.',
+  description: 'Products with an Item, SKU, and optional barcode and pricing.',
   barcodeFieldKey: 'barcode',
   barcodeFormat: BarcodeFormat.code128,
   fields: <TemplateField>[
@@ -11,7 +11,7 @@ const productTemplate = ImportTemplate(
       key: 'item_name',
       displayName: 'Item',
       dataType: FieldDataType.text,
-      required: true,
+      required: false,
       example: 'Plain Thosai',
     ),
     TemplateField(
@@ -41,6 +41,20 @@ const productTemplate = ImportTemplate(
       dataType: FieldDataType.text,
       required: false,
       example: 'RM 2.50',
+    ),
+    TemplateField(
+      key: 'expiry_date',
+      displayName: 'Expiry date',
+      dataType: FieldDataType.date,
+      required: false,
+      example: '2027-12-31',
+    ),
+    TemplateField(
+      key: 'receive_date',
+      displayName: 'Receive date',
+      dataType: FieldDataType.date,
+      required: false,
+      example: '2026-11-19',
     ),
   ],
 );

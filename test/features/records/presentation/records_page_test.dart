@@ -54,6 +54,8 @@ void main() {
             'item_name': 'Blue Hoodie',
             'barcode': 'ABC-002',
             'category': ' apparel ',
+            'expiry_date': '2027-12-31',
+            'receive_date': '2026-11-19',
           },
         ),
       ],
@@ -96,6 +98,8 @@ void main() {
     );
     expect(find.text('Blue Hoodie'), findsOneWidget);
     expect(find.text('Category: apparel'), findsOneWidget);
+    expect(find.text('Expiry: 2027-12-31'), findsOneWidget);
+    expect(find.text('Received: 2026-11-19'), findsOneWidget);
 
     await tester.enterText(find.byType(EditableText), 'hoodie');
     await tester.pumpAndSettle();
@@ -176,6 +180,8 @@ void main() {
     expect(printer.operations, <String>['connect', 'print', 'disconnect']);
     expect(printer.request!.recordIds, <String>['record-2']);
     expect(printer.request!.labels.single.copies, 100);
+    expect(printer.request!.labels.single.expiryDate, '2027-12-31');
+    expect(printer.request!.labels.single.receiveDate, '2026-11-19');
     expect(find.byType(RecordDetailsPage), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -25,7 +25,7 @@ class TemplateSettingsRepository {
           .toSet();
       final requiredKeys =
           decoded.whereType<String>().where(availableKeys.contains).toSet()
-            ..add(template.barcodeFieldKey);
+            ..remove(template.barcodeFieldKey);
       return template.withRequiredFieldKeys(requiredKeys);
     } on FormatException {
       return template;
@@ -41,8 +41,7 @@ class TemplateSettingsRepository {
         .toSet();
     final values = <String>{
       ...requiredFieldKeys.where(supportedKeys.contains),
-      template.barcodeFieldKey,
-    }.toList()..sort();
+    }.where((String key) => key != template.barcodeFieldKey).toList()..sort();
     return _database.saveMetadata(
       key: _productRequiredFieldsKey,
       value: jsonEncode(values),

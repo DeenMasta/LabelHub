@@ -73,7 +73,7 @@ class _LabelsPageState extends State<LabelsPage> {
               setState(() => _secondaryFieldKey = key);
             }
           },
-          onPreparePrint: () => context.go(
+          onPreparePrint: () => context.push(
             Uri(
               path: '/printing',
               queryParameters: <String, String>{
@@ -135,6 +135,10 @@ class _LabelLayoutSummary extends StatelessWidget {
                   const Text(
                     'Fixed layout with configurable product-field bindings.',
                   ),
+                  if (layout.isPriceLabel) ...<Widget>[
+                    const SizedBox(height: 4),
+                    const Text('Price-only layout; barcode is omitted.'),
+                  ],
                 ],
               ),
             ),
@@ -205,6 +209,8 @@ class _LabelPreviewPanel extends StatelessWidget {
                         primaryText: _fieldDisplayName(primaryFieldKey),
                         secondaryText: _fieldDisplayName(secondaryFieldKey),
                         barcodeValue: 'DEMO-123456',
+                        expiryDate: '2027-12-31',
+                        receiveDate: '2026-11-19',
                         barcodePreview: barcodePreview,
                       ),
                     ),
@@ -366,6 +372,8 @@ class _LabelPreviewSurface extends StatelessWidget {
     required this.primaryText,
     required this.secondaryText,
     required this.barcodeValue,
+    required this.expiryDate,
+    required this.receiveDate,
     required this.barcodePreview,
   });
 
@@ -373,6 +381,8 @@ class _LabelPreviewSurface extends StatelessWidget {
   final String primaryText;
   final String secondaryText;
   final String barcodeValue;
+  final String expiryDate;
+  final String receiveDate;
   final BarcodePreview barcodePreview;
 
   @override
@@ -384,11 +394,7 @@ class _LabelPreviewSurface extends StatelessWidget {
         final verticalPadding = layout.verticalPaddingMm * pixelsPerMm;
         final barcodeWidth = layout.barcodeWidthMm * pixelsPerMm;
         final barcodeHeight = layout.barcodeHeightMm * pixelsPerMm;
-        final barcodeTop =
-            constraints.maxHeight -
-            verticalPadding -
-            barcodeHeight -
-            (3 * pixelsPerMm);
+        final barcodeTop = 9 * pixelsPerMm;
         return DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -398,59 +404,108 @@ class _LabelPreviewSurface extends StatelessWidget {
           child: Stack(
             children: <Widget>[
               Positioned(
-                top: verticalPadding,
+                top: layout.isPriceLabel ? verticalPadding : 1.5 * pixelsPerMm,
                 left: horizontalPadding,
                 right: horizontalPadding,
                 child: Text(
                   primaryText,
-                  maxLines: 1,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 3.8 * pixelsPerMm,
+                    fontSize:
+                        (primaryText.length <= 11 ? 4.2 : 2.5) * pixelsPerMm,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.navy,
                   ),
                 ),
               ),
               Positioned(
-                top: verticalPadding + (5 * pixelsPerMm),
+                top: layout.isPriceLabel
+                    ? verticalPadding + (7 * pixelsPerMm)
+                    : 6 * pixelsPerMm,
                 left: horizontalPadding,
                 right: horizontalPadding,
                 child: Text(
                   secondaryText,
+                  textAlign: TextAlign.left,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 3 * pixelsPerMm,
+                    fontSize: (layout.isPriceLabel ? 4 : 3) * pixelsPerMm,
+                    fontWeight: layout.isPriceLabel
+                        ? FontWeight.w800
+                        : FontWeight.normal,
                     color: AppTheme.navy,
                   ),
                 ),
               ),
-              Positioned(
-                top: barcodeTop,
-                left: horizontalPadding,
-                width: barcodeWidth,
-                height: barcodeHeight,
-                child: _BarcodeGraphic(preview: barcodePreview),
-              ),
-              Positioned(
-                top: barcodeTop + barcodeHeight,
-                left: horizontalPadding,
-                width: barcodeWidth,
-                height: 3 * pixelsPerMm,
-                child: Center(
-                  child: Text(
-                    barcodeValue,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 2 * pixelsPerMm,
-                      letterSpacing: .5,
-                      color: AppTheme.navy,
+              if (!layout.isPriceLabel)
+                Positioned(
+                  top: barcodeTop,
+                  left: horizontalPadding,
+                  width: barcodeWidth,
+                  height: barcodeHeight,
+                  child: _BarcodeGraphic(preview: barcodePreview),
+                ),
+              if (!layout.isPriceLabel)
+                Positioned(
+                  top: barcodeTop + barcodeHeight,
+                  left: horizontalPadding,
+                  width: barcodeWidth,
+                  height: 3 * pixelsPerMm,
+                  child: Center(
+                    child: Text(
+                      barcodeValue,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 2 * pixelsPerMm,
+                        letterSpacing: .5,
+                        color: AppTheme.navy,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              if (!layout.isPriceLabel)
+                Positioned(
+                  top: barcodeTop + barcodeHeight + (3.5 * pixelsPerMm),
+                  left: horizontalPadding,
+                  right: horizontalPadding,
+                  child: Text(
+                    'EXP:$expiryDate',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
+                  ),
+                ),
+              if (layout.isPriceLabel)
+                Positioned(
+                  top: verticalPadding + (20 * pixelsPerMm),
+                  left: horizontalPadding,
+                  child: Text(
+                    'EXP:$expiryDate',
+                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
+                  ),
+                ),
+              if (layout.isPriceLabel)
+                Positioned(
+                  top: verticalPadding + (22 * pixelsPerMm),
+                  left: horizontalPadding,
+                  child: Text(
+                    'RCV:$receiveDate',
+                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
+                  ),
+                ),
+              if (!layout.isPriceLabel)
+                Positioned(
+                  top: barcodeTop + barcodeHeight + (6 * pixelsPerMm),
+                  left: horizontalPadding,
+                  right: horizontalPadding,
+                  child: Text(
+                    'RCV:$receiveDate',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 1.25 * pixelsPerMm),
+                  ),
+                ),
             ],
           ),
         );

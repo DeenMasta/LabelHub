@@ -18,6 +18,9 @@ class RecordRepository {
   }
 
   Future<bool> hasDuplicateBarcode(CatalogueRecord record) {
+    if (record.barcodeValue.trim().isEmpty) {
+      return Future<bool>.value(false);
+    }
     return _database.barcodeExistsForAnotherRecord(
       templateId: record.templateId,
       barcodeValue: record.barcodeValue,

@@ -334,7 +334,7 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
                     record: records[index],
                     isSelected: _selectedRecordIds.contains(records[index].id),
                     onToggle: (bool? _) => _toggleSelection(records[index].id),
-                    onOpen: () => context.go('/records/${records[index].id}'),
+                    onOpen: () => context.push('/records/${records[index].id}'),
                   ),
                   if (index < records.length - 1) const SizedBox(height: 12),
                 ],
@@ -379,7 +379,7 @@ class _RecordsPageState extends ConsumerState<RecordsPage> {
                 : FloatingActionButton.extended(
                     key: const Key('records-import-button'),
                     heroTag: 'records-import',
-                    onPressed: () => context.go('/imports'),
+                    onPressed: () => context.push('/imports'),
                     icon: const Icon(Icons.file_upload_outlined),
                     label: const Text('Import products'),
                   ),
@@ -711,6 +711,10 @@ class _RecordDetails extends StatelessWidget {
         _RecordMetadata(label: 'Category', value: category),
       if (_fieldValue('price') case final price?)
         _RecordMetadata(label: 'Price', value: price),
+      if (_fieldValue('expiry_date') case final expiryDate?)
+        _RecordMetadata(label: 'Expiry', value: expiryDate),
+      if (_fieldValue('receive_date') case final receiveDate?)
+        _RecordMetadata(label: 'Received', value: receiveDate),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -908,7 +912,7 @@ class _EmptyRecordsPanel extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
-              onPressed: () => context.go('/imports'),
+              onPressed: () => context.push('/imports'),
               icon: const Icon(Icons.file_upload_outlined),
               label: const Text('Import products'),
             ),

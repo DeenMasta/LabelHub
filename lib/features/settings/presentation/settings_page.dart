@@ -39,7 +39,7 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => context.go('/settings/printers'),
+            onTap: () => context.push('/settings/printers'),
           ),
         ),
       ],

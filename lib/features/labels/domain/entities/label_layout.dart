@@ -12,6 +12,7 @@ class LabelLayout {
     required this.verticalPaddingMm,
     required this.barcodeWidthMm,
     required this.barcodeHeightMm,
+    this.isPriceLabel = false,
   });
 
   final String id;
@@ -22,6 +23,7 @@ class LabelLayout {
   final double verticalPaddingMm;
   final double barcodeWidthMm;
   final double barcodeHeightMm;
+  final bool isPriceLabel;
 
   double get aspectRatio => widthMm / heightMm;
 }
@@ -34,7 +36,7 @@ const productLabelLayout = LabelLayout(
   horizontalPaddingMm: 3,
   verticalPaddingMm: 3,
   barcodeWidthMm: 34,
-  barcodeHeightMm: 10,
+  barcodeHeightMm: 6.5,
 );
 
 const wideProductLabelLayout = LabelLayout(
@@ -45,7 +47,7 @@ const wideProductLabelLayout = LabelLayout(
   horizontalPaddingMm: 3,
   verticalPaddingMm: 3,
   barcodeWidthMm: 52,
-  barcodeHeightMm: 15,
+  barcodeHeightMm: 6.5,
 );
 
 const compactProductLabelLayout = LabelLayout(
@@ -56,13 +58,26 @@ const compactProductLabelLayout = LabelLayout(
   horizontalPaddingMm: 3,
   verticalPaddingMm: 3,
   barcodeWidthMm: 24,
-  barcodeHeightMm: 15,
+  barcodeHeightMm: 6.5,
+);
+
+const priceLabelLayout = LabelLayout(
+  id: 'price-label-40x30',
+  name: 'Price label',
+  widthMm: 40,
+  heightMm: 30,
+  horizontalPaddingMm: 3,
+  verticalPaddingMm: 3,
+  barcodeWidthMm: 34,
+  barcodeHeightMm: 10,
+  isPriceLabel: true,
 );
 
 const productLabelLayouts = <LabelLayout>[
   productLabelLayout,
   wideProductLabelLayout,
   compactProductLabelLayout,
+  priceLabelLayout,
 ];
 
 LabelLayout productLabelLayoutForId(String? id) {

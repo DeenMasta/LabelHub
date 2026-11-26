@@ -19,13 +19,38 @@ void main() {
       ),
     );
 
-    expect(printer.operations, <String>['connect', 'print', 'disconnect']);
+    expect(printer.operations, <String>['connect', 'print']);
     expect(printer.request!.labels.single.barcodeValue, 'TEST-123456');
+  });
+
+  test('disconnects after a failed Bluetooth test print', () async {
+    final printer = _FakeLabelPrinter(
+      printResult: const PrintResult(succeeded: false),
+    );
+    final service = PrinterTestPrintService(
+      printerCatalog: PrinterCatalog(bluetoothPrinter: printer),
+    );
+
+    await expectLater(
+      service.printTestLabel(
+        const PrinterProfile(
+          id: 'wp410',
+          name: 'WP410',
+          address: 'AA:BB:CC:DD:EE:FF',
+        ),
+      ),
+      throwsA(isA<PrinterTestPrintException>()),
+    );
+
+    expect(printer.operations, <String>['connect', 'print', 'disconnect']);
   });
 }
 
 class _FakeLabelPrinter implements LabelPrinter {
+  _FakeLabelPrinter({this.printResult = const PrintResult(succeeded: true)});
+
   final List<String> operations = <String>[];
+  final PrintResult printResult;
   PrintRequest? request;
 
   @override
@@ -45,6 +70,6 @@ class _FakeLabelPrinter implements LabelPrinter {
   Future<PrintResult> printLabels(PrintRequest request) async {
     operations.add('print');
     this.request = request;
-    return const PrintResult(succeeded: true);
+    return printResult;
   }
 }

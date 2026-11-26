@@ -25,6 +25,7 @@ class DirectLabelPrintService {
     final selectedProfile = await _defaultProfile();
     final selectedPrinter = selectedProfile.toDevice();
     final printer = _printerCatalog.printerFor(selectedProfile.connectionType);
+    var completed = false;
     try {
       if (printer is! TsplMediaCalibratingPrinter) {
         throw const DirectLabelPrintException(
@@ -42,11 +43,15 @@ class DirectLabelPrintService {
           result.message ?? 'The printer could not calibrate the label media.',
         );
       }
+      completed = true;
     } finally {
-      try {
-        await printer.disconnect();
-      } on Exception {
-        // A best-effort socket close must not mask the calibration outcome.
+      if (!completed ||
+          selectedProfile.connectionType != PrinterConnectionType.bluetooth) {
+        try {
+          await printer.disconnect();
+        } on Exception {
+          // A best-effort transport close must not mask the calibration outcome.
+        }
       }
     }
   }
@@ -67,6 +72,7 @@ class DirectLabelPrintService {
     final selectedProfile = await _defaultProfile();
     final selectedPrinter = selectedProfile.toDevice();
     LabelPrinter? connectedPrinter;
+    var completed = false;
     try {
       connectedPrinter = _printerCatalog.printerFor(selectedProfile.connectionType);
       await connectedPrinter.connect(selectedPrinter);
@@ -82,11 +88,14 @@ class DirectLabelPrintService {
                   secondaryText: _fieldValue(record, secondaryFieldKey),
                   barcodeValue: record.barcodeValue,
                   copies: recordCopies[record.id] ?? 1,
+                  expiryDate: _fieldValue(record, 'expiry_date'),
+                  receiveDate: _fieldValue(record, 'receive_date'),
                 ),
               )
               .toList(),
           labelWidthMm: layout.widthMm,
           labelHeightMm: layout.heightMm,
+          isPriceLabel: layout.isPriceLabel,
         ),
       );
       if (!result.succeeded) {
@@ -94,8 +103,12 @@ class DirectLabelPrintService {
           result.message ?? 'The printer could not complete the print job.',
         );
       }
+      completed = true;
     } finally {
-      if (connectedPrinter != null) {
+      if (connectedPrinter != null &&
+          (!completed ||
+              selectedProfile.connectionType !=
+                  PrinterConnectionType.bluetooth)) {
         try {
           await connectedPrinter.disconnect();
         } on Exception {

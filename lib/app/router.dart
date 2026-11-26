@@ -107,8 +107,8 @@ class _AppShell extends StatelessWidget {
       body: Column(
         children: <Widget>[
           AppHeader(
-            onPrinterPressed: () => context.go('/settings/printers'),
-            onSettingsPressed: () => context.go('/settings'),
+            onPrinterPressed: () => context.push('/settings/printers'),
+            onSettingsPressed: () => context.push('/settings'),
           ),
           Expanded(child: child),
         ],

@@ -82,4 +82,14 @@ void main() {
     await repository.delete(updated);
     expect(await repository.getById(record.id), isNull);
   });
+
+  test('does not treat blank barcodes as duplicates', () async {
+    final record = (await repository.list()).first;
+    final withoutBarcode = record.copyWith(
+      barcodeValue: '',
+      values: <String, String>{...record.values, 'barcode': ''},
+    );
+
+    expect(await repository.hasDuplicateBarcode(withoutBarcode), isFalse);
+  });
 }

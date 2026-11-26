@@ -247,7 +247,7 @@ class _PrintingPageState extends ConsumerState<PrintingPage> {
         else if (_loadError != null)
           _PrintingLoadError(onRetry: _load)
         else if (_records.isEmpty)
-          _NoRecordsToPrint(onImport: () => context.go('/imports'))
+          _NoRecordsToPrint(onImport: () => context.push('/imports'))
         else ...<Widget>[
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {

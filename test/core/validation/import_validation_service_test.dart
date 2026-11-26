@@ -75,4 +75,65 @@ void main() {
 
     expect(result.validRowCount, 1);
   });
+
+  test('allows a product row without a barcode', () {
+    final result = validator.validate(
+      template: productTemplate,
+      headers: const <String>['item_code', 'item_name', 'barcode'],
+      rows: const <List<String>>[
+        <String>['ITEM-1001', 'Blue T-Shirt', ''],
+      ],
+      columnMapping: const <String, String?>{
+        'item_code': 'item_code',
+        'item_name': 'item_name',
+        'barcode': 'barcode',
+      },
+      existingBarcodeValues: const <String>{},
+    );
+
+    expect(result.validRowCount, 1);
+  });
+
+  test('accepts optional ISO dates and rejects invalid dates', () {
+    final result = validator.validate(
+      template: productTemplate,
+      headers: const <String>[
+        'item_code',
+        'item_name',
+        'barcode',
+        'expiry_date',
+        'receive_date',
+      ],
+      rows: const <List<String>>[
+        <String>[
+          'ITEM-1001',
+          'Blue T-Shirt',
+          'ITEM-1001',
+          '2027-12-31',
+          '2026-11-19',
+        ],
+        <String>[
+          'ITEM-1002',
+          'Green T-Shirt',
+          'ITEM-1002',
+          '31/12/2027',
+          '',
+        ],
+      ],
+      columnMapping: const <String, String?>{
+        'item_code': 'item_code',
+        'item_name': 'item_name',
+        'barcode': 'barcode',
+        'expiry_date': 'expiry_date',
+        'receive_date': 'receive_date',
+      },
+      existingBarcodeValues: const <String>{},
+    );
+
+    expect(result.validRowCount, 1);
+    expect(
+      result.rows.last.issues.single.message,
+      'Expiry date has an invalid date value.',
+    );
+  });
 }

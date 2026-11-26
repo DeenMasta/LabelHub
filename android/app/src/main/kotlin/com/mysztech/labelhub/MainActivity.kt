@@ -232,6 +232,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun connectBluetoothPrinter(address: String) {
+        val activeSocket = bluetoothSocket
+        if (activeSocket?.isConnected == true &&
+            activeSocket.remoteDevice.address == address &&
+            bluetoothOutput != null
+        ) {
+            return
+        }
         disconnectBluetoothPrinter()
         val adapter = BluetoothAdapter.getDefaultAdapter()
             ?: throw IllegalStateException("Bluetooth is unavailable on this device.")

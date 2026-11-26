@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:labelhub/core/printing/bluetooth_thermal_printer.dart';
 import 'package:labelhub/core/printing/label_printer.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('writes an encoded barcode label to the connected printer', () async {
     const channel = MethodChannel('labelhub/test_bluetooth_printer');
     final calls = <String>[];
@@ -47,10 +49,7 @@ void main() {
 
     expect(result.succeeded, isTrue);
     expect(calls, <String>['connect', 'write']);
-    expect(utf8.decode(labelBytes!), contains('BARCODE 128'));
+    expect(utf8.decode(labelBytes!), contains('BARCODE 77,72,"128"'));
     expect(utf8.decode(labelBytes!), contains('ITEM-001'));
   });
 }
-import 'dart:convert';
-import 'dart:typed_data';
-

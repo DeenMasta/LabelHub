@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:barcode/barcode.dart';
+
 import 'label_printer.dart';
 import '../utilities/text_utils.dart';
 
@@ -15,61 +17,69 @@ class TsplLabelCommandEncoder {
     for (final label in request.labels) {
       _validate(label);
       _validateCopies(label.copies);
-      {
+      for (var copy = 0; copy < label.copies; copy++) {
         _writeLine(
           commands,
           'SIZE ${_millimetres(request.labelWidthMm)} mm,${_millimetres(request.labelHeightMm)} mm',
         );
-        _writeLine(commands, 'GAP 2 mm,0 mm');
         _writeLine(commands, 'DIRECTION 1');
         _writeLine(commands, 'CLS');
 
-        final nameLines = TextUtils.splitToTwoLines(
-          label.primaryText,
-          limit: 16,
-          limitLine2: 24,
-        );
-        if (nameLines.length == 1) {
-          _writeLine(
-            commands,
-            'TEXT 24,20,"3",0,1,1,"${_escape(nameLines[0])}"',
-          );
-          _writeLine(
-            commands,
-            'TEXT 24,52,"2",0,1,1,"${_escape(label.secondaryText)}"',
-          );
-          _writeLine(
-            commands,
-            'BARCODE 24,92,"128",76,0,0,2,2,"${_escape(label.barcodeValue)}"',
-          );
-          _writeLine(
-            commands,
-            'TEXT 24,180,"2",0,1,1,"${_escape(label.barcodeValue)}"',
-          );
-        } else {
-          _writeLine(
-            commands,
-            'TEXT 24,16,"3",0,1,1,"${_escape(nameLines[0])}"',
-          );
-          _writeLine(
-            commands,
-            'TEXT 24,46,"2",0,1,1,"${_escape(nameLines[1])}"',
-          );
-          _writeLine(
-            commands,
-            'TEXT 24,76,"2",0,1,1,"${_escape(label.secondaryText)}"',
-          );
-          _writeLine(
-            commands,
-            'BARCODE 24,110,"128",76,0,0,2,2,"${_escape(label.barcodeValue)}"',
-          );
-          _writeLine(
-            commands,
-            'TEXT 24,198,"2",0,1,1,"${_escape(label.barcodeValue)}"',
-          );
+        if (request.isPriceLabel) {
+          _writePriceLabel(commands, label);
+          _writeLine(commands, 'PRINT 1,1');
+          continue;
         }
 
-        _writeLine(commands, 'PRINT 1,${label.copies}');
+        final maxDots = ((request.labelWidthMm - 6) * 8).floor();
+        final largeLimit = maxDots ~/ 24;
+        final mediumLimit = maxDots ~/ 16;
+        final smallLimit = maxDots ~/ 12;
+        if (largeLimit < 1 || smallLimit < 1) {
+          throw const FormatException('Label is too narrow for product text.');
+        }
+        final name = label.primaryText.trim();
+        final font = name.length <= largeLimit
+            ? '4'
+            : name.length <= mediumLimit
+            ? '3'
+            : '2';
+        final nameLines = font != '2'
+            ? <String>[name]
+            : _wrapName(name, smallLimit);
+        if (nameLines.length > 3) {
+          throw const FormatException(
+            'Product name is too long to fit on this label.',
+          );
+        }
+        for (var i = 0; i < nameLines.length; i++) {
+          _writeLine(
+            commands,
+            'TEXT 24,${12 + i * 22},"$font",0,1,1,"${_escape(nameLines[i])}"',
+          );
+        }
+        final secondaryY =
+            12 + (nameLines.length - 1) * 22 + (font == '4' ? 32 : 24) + 4;
+        final barcodeY = secondaryY + 24;
+        _writeLine(
+          commands,
+          'TEXT 24,$secondaryY,"2",0,1,1,"${_escape(label.secondaryText)}"',
+        );
+        _writeBarcode(
+          commands,
+          label,
+          labelWidthMm: request.labelWidthMm,
+          y: barcodeY,
+          textY: barcodeY + 54,
+        );
+        _writeDates(
+          commands,
+          label,
+          y: barcodeY + 80,
+          labelWidthMm: request.labelWidthMm,
+        );
+
+        _writeLine(commands, 'PRINT 1,1');
       }
     }
     return Uint8List.fromList(commands.toString().codeUnits);
@@ -91,6 +101,8 @@ class TsplLabelCommandEncoder {
       label.primaryText,
       label.secondaryText,
       label.barcodeValue,
+      label.expiryDate,
+      label.receiveDate,
     ]) {
       if (value.contains('\r') || value.contains('\n')) {
         throw const FormatException(
@@ -98,10 +110,118 @@ class TsplLabelCommandEncoder {
         );
       }
     }
+  }
+
+  void _writePriceLabel(StringBuffer commands, PrintLabelData label) {
+    final nameLines = TextUtils.splitToTwoLines(
+      label.primaryText,
+      limit: 16,
+      limitLine2: 24,
+    );
+    _writeLine(commands, 'TEXT 24,20,"3",0,1,1,"${_escape(nameLines[0])}"');
+    if (nameLines.length == 2) {
+      _writeLine(commands, 'TEXT 24,50,"2",0,1,1,"${_escape(nameLines[1])}"');
+    }
+    _writeLine(
+      commands,
+      'TEXT 24,${nameLines.length == 2 ? 100 : 84},"2",0,2,2,"${_escape(label.secondaryText)}"',
+    );
+    _writeDates(commands, label, y: nameLines.length == 2 ? 168 : 160);
+  }
+
+  List<String> _wrapName(String name, int limit) {
+    final lines = <String>[];
+    var remaining = name;
+    while (remaining.length > limit) {
+      final space = remaining.lastIndexOf(' ', limit);
+      final end = space > 0 ? space : limit;
+      lines.add(remaining.substring(0, end));
+      remaining = remaining.substring(end).trimLeft();
+    }
+    lines.add(remaining);
+    return lines;
+  }
+
+  void _writeBarcode(
+    StringBuffer commands,
+    PrintLabelData label, {
+    required double labelWidthMm,
+    required int y,
+    required int textY,
+  }) {
     if (label.barcodeValue.isEmpty) {
-      throw const FormatException('A barcode value is required for printing.');
+      return;
+    }
+    if (label.barcodeValue.codeUnits.any((code) => code < 32 || code > 126)) {
+      throw const FormatException(
+        'Barcode must contain printable ASCII characters.',
+      );
+    }
+    try {
+      Barcode.code128().verify(label.barcodeValue);
+    } on BarcodeException catch (error) {
+      throw FormatException(error.message);
+    }
+    final widthDots = (labelWidthMm * 203 / 25.4).round();
+    final value = label.barcodeValue;
+    final numeric = RegExp(r'^\d+$').hasMatch(value);
+    final dataCodes = numeric
+        ? (value.length + 1) ~/ 2 + (value.length.isOdd ? 1 : 0)
+        : value.length;
+    final modules = (dataCodes + 2) * 11 + 13 + 20;
+    final moduleWidth = modules * 2 <= widthDots ? 2 : 1;
+    if (modules > widthDots) {
+      throw const FormatException('Barcode is too long to fit on this label.');
+    }
+    // shortcut: automatic Code 128 compression can shift the barcode left,
+    // use verified printer-specific measurements when the model is known.
+    final barcodeX = ((widthDots - (modules - 20) * moduleWidth) / 2).round();
+    _writeLine(
+      commands,
+      'BARCODE $barcodeX,$y,"128",52,0,0,$moduleWidth,$moduleWidth,"${_escape(label.barcodeValue)}"',
+    );
+    _writeLine(
+      commands,
+      'TEXT ${_centerTextX(labelWidthMm, label.barcodeValue, 12)},$textY,"1",0,1,1,"${_escape(label.barcodeValue)}"',
+    );
+  }
+
+  void _writeDates(
+    StringBuffer commands,
+    PrintLabelData label, {
+    required int y,
+    double? labelWidthMm,
+  }) {
+    final expiryText = _dateText('EXP', label.expiryDate);
+    final receiveText = _dateText('RCV', label.receiveDate);
+    if (expiryText == null && receiveText == null) {
+      return;
+    }
+
+    final receiveDateOffsetDots = labelWidthMm == null ? 16 : 20;
+    if (expiryText != null) {
+      _writeLine(
+        commands,
+        'TEXT ${labelWidthMm == null ? 24 : _centerTextX(labelWidthMm, expiryText, 12)},$y,"1",0,1,1,"${_escape(expiryText)}"',
+      );
+    }
+    if (receiveText != null) {
+      _writeLine(
+        commands,
+        'TEXT ${labelWidthMm == null ? 24 : _centerTextX(labelWidthMm, receiveText, 12)},${expiryText == null ? y : y + receiveDateOffsetDots},"1",0,1,1,"${_escape(receiveText)}"',
+      );
     }
   }
+
+  String? _dateText(String label, String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : '$label:$trimmed';
+  }
+
+  int _centerTextX(double labelWidthMm, String text, int characterWidth) =>
+      (((labelWidthMm * 203 / 25.4) - text.length * characterWidth) / 2)
+          .round()
+          .clamp(0, 0x7fffffff);
 
   void _validateCopies(int copies) {
     if (copies < 1) {

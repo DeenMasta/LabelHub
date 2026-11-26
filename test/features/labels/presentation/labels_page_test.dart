@@ -20,6 +20,16 @@ void main() {
     expect(find.text('1. Label content'), findsOneWidget);
     expect(find.text('2. General preview'), findsOneWidget);
     expect(find.text('DEMO-123456'), findsOneWidget);
+    expect(find.text('EXP:2027-12-31'), findsOneWidget);
+    expect(find.text('RCV:2026-11-19'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.text('EXP:2027-12-31')).textAlign,
+      TextAlign.center,
+    );
+    expect(
+      tester.widget<Text>(find.text('RCV:2026-11-19')).textAlign,
+      TextAlign.center,
+    );
     expect(find.text('Blue T-Shirt'), findsNothing);
     expect(
       tester.getTopLeft(find.text('1. Label content')).dy,

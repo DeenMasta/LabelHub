@@ -12,6 +12,7 @@ class PrinterTestPrintService {
 
   Future<void> printTestLabel(PrinterProfile profile) async {
     final printer = _printerCatalog.printerFor(profile.connectionType);
+    var completed = false;
     try {
       await printer.connect(profile.toDevice());
       final result = await printer.printLabels(
@@ -34,11 +35,15 @@ class PrinterTestPrintService {
           result.message ?? 'The printer did not accept the test label.',
         );
       }
+      completed = true;
     } finally {
-      try {
-        await printer.disconnect();
-      } on Exception {
-        // A best-effort transport close must not mask the test result.
+      if (!completed ||
+          profile.connectionType != PrinterConnectionType.bluetooth) {
+        try {
+          await printer.disconnect();
+        } on Exception {
+          // A best-effort transport close must not mask the test result.
+        }
       }
     }
   }
