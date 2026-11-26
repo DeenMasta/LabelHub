@@ -39,12 +39,12 @@ class TsplLabelCommandEncoder {
           throw const FormatException('Label is too narrow for product text.');
         }
         final name = label.primaryText.trim();
-        final font = name.length <= largeLimit
+        var font = name.length <= largeLimit
             ? '4'
             : name.length <= mediumLimit
             ? '3'
             : '2';
-        final nameLines = font != '2'
+        var nameLines = font != '2'
             ? <String>[name]
             : _wrapName(name, smallLimit);
         if (nameLines.length > 3) {
@@ -52,18 +52,50 @@ class TsplLabelCommandEncoder {
             'Product name is too long to fit on this label.',
           );
         }
+        var lineHeight = 22;
+        var fontHeight = font == '4' ? 32 : 24;
+        var secondaryScale = 1;
+        if (label.expiryDate.trim().isEmpty &&
+            label.receiveDate.trim().isEmpty) {
+          final heightDots = (request.labelHeightMm * 203 / 25.4).floor();
+          for (final candidate in <(String, int, int)>[
+            ('5', 32, 48),
+            ('4', 24, 32),
+            ('3', 16, 24),
+            ('2', 12, 20),
+          ]) {
+            final limit = maxDots ~/ candidate.$2;
+            if (limit < 1) continue;
+            final lines = _wrapName(name, limit);
+            final scale = label.secondaryText.length * 24 <= maxDots ? 2 : 1;
+            final bottom =
+                12 +
+                lines.length * candidate.$3 +
+                4 +
+                (scale == 2 ? 44 : 24) +
+                74;
+            if (lines.length <= 3 && bottom <= heightDots - 24) {
+              font = candidate.$1;
+              nameLines = lines;
+              lineHeight = candidate.$3;
+              fontHeight = candidate.$3;
+              secondaryScale = scale;
+              break;
+            }
+          }
+        }
         for (var i = 0; i < nameLines.length; i++) {
           _writeLine(
             commands,
-            'TEXT 24,${12 + i * 22},"$font",0,1,1,"${_escape(nameLines[i])}"',
+            'TEXT 24,${12 + i * lineHeight},"$font",0,1,1,"${_escape(nameLines[i])}"',
           );
         }
         final secondaryY =
-            12 + (nameLines.length - 1) * 22 + (font == '4' ? 32 : 24) + 4;
-        final barcodeY = secondaryY + 24;
+            12 + (nameLines.length - 1) * lineHeight + fontHeight + 4;
+        final barcodeY = secondaryY + (secondaryScale == 2 ? 44 : 24);
         _writeLine(
           commands,
-          'TEXT 24,$secondaryY,"2",0,1,1,"${_escape(label.secondaryText)}"',
+          'TEXT 24,$secondaryY,"2",0,$secondaryScale,$secondaryScale,"${_escape(label.secondaryText)}"',
         );
         _writeBarcode(
           commands,

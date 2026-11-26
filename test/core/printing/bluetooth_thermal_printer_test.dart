@@ -49,7 +49,7 @@ void main() {
 
     expect(result.succeeded, isTrue);
     expect(calls, <String>['connect', 'write']);
-    expect(utf8.decode(labelBytes!), contains('BARCODE 77,72,"128"'));
+    expect(utf8.decode(labelBytes!), contains('BARCODE 77,108,"128"'));
     expect(utf8.decode(labelBytes!), contains('ITEM-001'));
   });
 }

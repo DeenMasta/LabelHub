@@ -8,7 +8,8 @@ void main() {
   PrintRequest request({
     String barcodeValue = 'ITEM-1001',
     String primaryText = 'Blue T-Shirt',
-    String expiryDate = '',
+    String secondaryText = '29.90',
+    String expiryDate = '2027-12-31',
     String receiveDate = '',
     double widthMm = 40,
   }) => PrintRequest(
@@ -16,7 +17,7 @@ void main() {
     labels: <PrintLabelData>[
       PrintLabelData(
         primaryText: primaryText,
-        secondaryText: '29.90',
+        secondaryText: secondaryText,
         barcodeValue: barcodeValue,
         copies: 1,
         expiryDate: expiryDate,
@@ -57,6 +58,61 @@ void main() {
       () => encoder.encode(request(primaryText: 'x' * 100)),
       throwsFormatException,
     );
+  });
+
+  test('enlarges the name and price only when both dates are empty', () {
+    final noDates = String.fromCharCodes(
+      encoder.encode(
+        request(primaryText: 'Milk', expiryDate: '', receiveDate: '  '),
+      ),
+    );
+    expect(noDates, contains('TEXT 24,12,"5",0,1,1,"Milk"'));
+    expect(noDates, contains('TEXT 24,64,"2",0,2,2,"29.90"'));
+    expect(noDates, contains('BARCODE 26,108,"128",52,0,0,2,2,"ITEM-1001"'));
+
+    for (final dates in [
+      (expiry: '2027-12-31', receive: ''),
+      (expiry: '', receive: '2026-11-19'),
+    ]) {
+      final dated = String.fromCharCodes(
+        encoder.encode(
+          request(
+            primaryText: 'Milk',
+            expiryDate: dates.expiry,
+            receiveDate: dates.receive,
+          ),
+        ),
+      );
+      expect(dated, contains('TEXT 24,12,"4",0,1,1,"Milk"'));
+      expect(dated, contains('TEXT 24,48,"2",0,1,1,"29.90"'));
+    }
+  });
+
+  test('wraps an enlarged name and keeps the barcode inside the label', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(request(primaryText: 'Blue T-Shirt', expiryDate: '')),
+    );
+    expect(commands, contains('TEXT 24,12,"4",0,1,1,"Blue"'));
+    expect(commands, contains('TEXT 24,44,"4",0,1,1,"T-Shirt"'));
+    expect(commands, contains('TEXT 24,80,"2",0,2,2,"29.90"'));
+    expect(commands, contains('BARCODE 26,124,"128",52,0,0,2,2,"ITEM-1001"'));
+  });
+
+  test('keeps long names and second fields within the available width', () {
+    final commands = String.fromCharCodes(
+      encoder.encode(
+        request(
+          primaryText: 'x' * 60,
+          secondaryText: '123456789012345678',
+          expiryDate: '',
+        ),
+      ),
+    );
+    expect(commands, contains('TEXT 24,12,"2",0,1,1,"${'x' * 22}"'));
+    expect(commands, contains('TEXT 24,32,"2",0,1,1,"${'x' * 22}"'));
+    expect(commands, contains('TEXT 24,52,"2",0,1,1,"${'x' * 16}"'));
+    expect(commands, contains('TEXT 24,76,"2",0,1,1,"123456789012345678"'));
+    expect(commands, contains('BARCODE 26,100,"128",52,0,0,2,2,"ITEM-1001"'));
   });
 
   test('rejects barcode values that cannot form a TSPL command', () {
